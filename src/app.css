@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+@theme {
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  --font-mono: "SF Mono", SFMono-Regular, Monaco, monospace;
+}
+
+:root {
+  color-scheme: light;
+  --surface-0: #f3f3f5;
+  --surface-1: #ffffff;
+  --surface-2: #f7f7f9;
+  --surface-muted: #ededf1;
+  --surface-hover: #e8e8ed;
+  --border-subtle: #d9d9e0;
+  --border-strong: #c8c8d1;
+  --text-primary: #1b1b20;
+  --text-secondary: #3a3a42;
+  --text-muted: #5e5e68;
+  --text-value: #101015;
+  --focus-ring: #2f6ef6;
+  --focus-ring-offset: #ffffff;
+  --control-active-bg: #dfe7ff;
+  --control-active-border: #6f8cff;
+  --control-active-text: #1b2b63;
+  --status-normal: #1bb74f;
+  --status-warm: #ffb326;
+  --status-hot: #ff5f57;
+  --status-unknown: #9494a3;
+  --color-status-normal: var(--status-normal);
+  --color-status-warm: var(--status-warm);
+  --color-status-hot: var(--status-hot);
+  --color-status-unknown: var(--status-unknown);
+  --color-surface-card: var(--surface-2);
+  --color-surface-hover: var(--surface-hover);
+  --radius-card: 8px;
+  --radius-dot: 9999px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --surface-0: #151618;
+    --surface-1: #1d1e22;
+    --surface-2: #25272d;
+    --surface-muted: #2f3239;
+    --surface-hover: #373b44;
+    --border-subtle: #626a79;
+    --border-strong: #778090;
+    --text-primary: #f2f2f5;
+    --text-secondary: #d5d8e0;
+    --text-muted: #a7acb8;
+    --text-value: #ffffff;
+    --focus-ring: #88a8ff;
+    --focus-ring-offset: #101114;
+    --control-active-bg: #6b7383;
+    --control-active-border: #9ea8bd;
+    --control-active-text: #ffffff;
+    --status-normal: #34c759;
+    --status-warm: #ffcc00;
+    --status-hot: #ff5f57;
+    --status-unknown: #8e8e93;
+    --color-status-normal: var(--status-normal);
+    --color-status-warm: var(--status-warm);
+    --color-status-hot: var(--status-hot);
+    --color-status-unknown: var(--status-unknown);
+    --color-surface-card: var(--surface-2);
+    --color-surface-hover: var(--surface-hover);
+  }
+}
+
+html,
+body,
+#app {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  background-color: var(--surface-0);
+  color: var(--text-primary);
+}

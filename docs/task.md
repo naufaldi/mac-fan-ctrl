@@ -130,6 +130,55 @@ WIP policy: max 2 in-progress tickets per engineer, max 1 `Story` in Validation 
 - `MACFAN-101.6` – Alerts Baseline (US-A5), Due: 2026-03-31
 - `MACFAN-101.7` – Historical Storage Baseline (US-A6), Due: 2026-03-31
 
+### 4.1.1 Ticket execution log (Phase A foundation)
+
+- `MACFAN-101.0-T4` – Foundation Hello World flow
+  - `Owner`: Engineering
+  - `Status`: Done
+  - `Priority`: P1
+  - `Estimate`: 1 day
+  - `Depends on`: `MACFAN-101.0-T1`, `MACFAN-101.0-T2`, `MACFAN-101.0-T3`
+  - `Due date`: 2026-03-10
+  - `Definition of Done`: Basic Tauri + Rust + Svelte round-trip implemented and tested
+  - `Acceptance`: Frontend ping button calls `ping_backend` and receives `Hello from Rust: Hello world`
+  - `Risks`: Command contract and startup regression
+  - `Rollback note`: Revert `src-tauri/src/main.rs`, `src-tauri/src/commands.rs`, and restore baseline hello-world UI
+  - `Evidence`: `src-tauri/src/commands.rs`, `src-tauri/src/main.rs`, `src/App.svelte`, `src/lib/tauriCommands.ts`, `src/__tests__/App.test.ts`
+  - `Status Notes`: Completed and verified as the sprint 0 baseline before `MACFAN-101.1` start.
+
+- `MACFAN-101.1` – Tauri shell + menu bar bootstrapping
+  - `Owner`: Engineering
+  - `Status`: Validation
+  - `Priority`: P1
+  - `Estimate`: 2 days
+  - `Depends on`: `MACFAN-101.0`, `MACFAN-101.0-T4`
+  - `Due date`: 2026-03-17
+  - `Definition of Done`: App shell boots deterministically with menu bar/bootstrap logs and graceful fallback
+  - `Acceptance`: 
+    - App starts and initializes shell lifecycle logs.
+    - A top-level menu bar is installed via `Menu::default`.
+    - Menu bootstrap failures are logged without aborting startup.
+    - Startup checks can be replayed from logs.
+    - Run-time menu bar visibility should be validated in local desktop launch checks.
+  - `Risks`: Platform menu behavior differences (especially macOS quirks), menu API compatibility
+  - `Rollback note`: Remove menu bootstrap in `src-tauri/src/main.rs` setup block and restore previous `main` builder chain.
+  - `Verification`: `pnpm test`, `cargo check --manifest-path src-tauri/Cargo.toml`, and `cd src-tauri && cargo test` completed successfully after bootstrap changes; log path is `src-tauri/src/main.rs`.
+  - `Next`: Stage `MACFAN-101.2` after desktop validation of visible menu bar behavior.
+
+- `MACFAN-101.2-T1` – Desktop Layout Redesign
+  - `Owner`: Engineering
+  - `Status`: Done
+  - `Priority`: P1
+  - `Estimate`: 1 day
+  - `Depends on`: `MACFAN-101.0-T3`
+  - `Due date`: 2026-03-04
+  - `Definition of Done`: Desktop layout implemented matching the design brief and reference image.
+  - `Acceptance`: 2-column layout with fixed footer, dense 11px typography, fan control pane, and sensor list pane without scrolling.
+  - `Risks`: CSS layout regressions
+  - `Rollback note`: Revert `src/app.css` and Svelte components.
+  - `Evidence`: `src/app.css`, `src/components/DesktopDashboard.svelte`, `src/components/FanControlPane.svelte`, `src/components/SensorListPane.svelte`
+  - `Status Notes`: Completed. The layout closely matches the provided reference image with a dense, non-scrolling, professional utility design.
+
 ### 4.2 Epic MACFAN-102 (Phase B control + safety)
 
 - `MACFAN-102.1` – Safe Permission and Command Framework, Due: 2026-04-07
@@ -328,3 +377,4 @@ Examples:
 | 2026-03-04 | Initial project setup with pnpm workspace, learning docs | - |
 | 2026-03-04 | Created learning/ directory with Rust and system programming guides | - |
 | 2026-03-04 | Created AGENTS.md with AI agent context and conventions | - |
+| 2026-03-04 | Implemented Desktop Layout Redesign (MACFAN-101.2-T1) with dense 2-column UI | - |

@@ -82,6 +82,9 @@ pnpm tauri build      # Release bundle
 - Use Svelte 5 runes (`$state`, `$derived`, `$effect`) - no legacy `$:`
 - Explicit return types on async functions: `async function(): Promise<T>`
 - Use path aliases: `$lib/`, `$components/`, `$stores/`, `$types/`
+- Styling must use Tailwind CSS v4 utility classes; do not add plain CSS styling in `src/app.css`
+- Use a shared `cn()` helper (built with `clsx` + `tailwind-merge`) for conditional/overridable class names
+- Prefer `cn(...)` over manual template-string class concatenation when classes are dynamic
 - Error handling: `error instanceof Error` type guards
 - Component testing: Mock Tauri with `vi.mock('@tauri-apps/api/core')`
 

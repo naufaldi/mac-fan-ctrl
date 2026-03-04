@@ -1,11 +1,12 @@
 /// <reference types="vitest/config" />
 import path from "node:path";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import tailwindcss from "@tailwindcss/vite";
 import type { PluginOption } from "vite";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-	plugins: [svelte() as unknown as PluginOption],
+	plugins: [tailwindcss(), svelte() as unknown as PluginOption],
 	server: {
 		hmr: {
 			overlay: true,

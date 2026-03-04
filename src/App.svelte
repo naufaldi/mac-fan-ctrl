@@ -1,51 +1,72 @@
 <script lang="ts">
-import { pingBackend } from "$lib/tauriCommands";
+  import DesktopDashboard from './components/DesktopDashboard.svelte';
+  import type { TemperatureStatus, SensorData } from '$lib/designTokens';
+  import { cn } from "$lib/cn";
 
-let greeting = "Hello from Svelte";
-let pingResponse = "";
-let errorMessage = "";
-let loading = false;
-
-async function handlePing() {
-	loading = true;
-	errorMessage = "";
-	try {
-		pingResponse = await pingBackend("Hello world");
-	} catch (error) {
-		errorMessage = error instanceof Error ? error.message : String(error);
-	} finally {
-		loading = false;
-	}
-}
+  // Mock data for initial implementation
+  const mockSensors: SensorData[] = [
+    {
+      id: 'cpu',
+      label: 'CPU Package',
+      value: 72,
+      unit: 'celsius',
+      status: 'warm' as TemperatureStatus,
+      sparklineData: [68, 69, 70, 71, 72, 71, 72, 73, 72],
+    },
+    {
+      id: 'gpu',
+      label: 'GPU',
+      value: 68,
+      unit: 'celsius',
+      status: 'normal' as TemperatureStatus,
+    },
+    {
+      id: 'ram',
+      label: 'RAM',
+      value: 45,
+      unit: 'celsius',
+      status: 'normal' as TemperatureStatus,
+    },
+    {
+      id: 'fan-left',
+      label: 'Left Fan',
+      value: 2450,
+      unit: 'rpm',
+      status: 'normal' as TemperatureStatus,
+      minRpm: 1200,
+      maxRpm: 5779,
+      controlMode: 'constant',
+      targetRpm: 3000,
+      sparklineData: [2000, 2100, 2200, 2350, 2450],
+    },
+    {
+      id: 'fan-right',
+      label: 'Right Fan',
+      value: 2300,
+      unit: 'rpm',
+      status: 'normal' as TemperatureStatus,
+      minRpm: 1200,
+      maxRpm: 6241,
+      controlMode: 'constant',
+      targetRpm: 3000,
+    },
+    {
+      id: 'battery',
+      label: 'Battery',
+      value: 35,
+      unit: 'celsius',
+      status: 'normal' as TemperatureStatus,
+    },
+    {
+      id: 'ssd',
+      label: 'SSD',
+      value: 42,
+      unit: 'celsius',
+      status: 'normal' as TemperatureStatus,
+    },
+  ];
 </script>
 
-<main>
-  <h1>{greeting}</h1>
-  <button
-    type="button"
-    on:click={handlePing}
-    disabled={loading}
-  >
-    Ping backend
-  </button>
-  {#if loading}
-    <p>Loading...</p>
-  {/if}
-  {#if pingResponse}
-    <p data-testid="ping-response">{pingResponse}</p>
-  {/if}
-  {#if errorMessage}
-    <p class="error" data-testid="ping-error">{errorMessage}</p>
-  {/if}
+<main class={cn("flex h-full w-full")}>
+  <DesktopDashboard sensors={mockSensors} />
 </main>
-
-<style>
-  main {
-    font-family: "Arial", sans-serif;
-    padding: 1rem;
-  }
-
-  .error {
-    color: #b00020;
-  }
-</style>
