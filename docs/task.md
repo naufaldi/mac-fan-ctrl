@@ -1,5 +1,11 @@
 # mac-fan-ctrl Ticketing, Delivery Plan, DoD, Dates
 
+> **Living Document**: This file is continuously updated throughout development.
+> - Ticket status updates happen here first
+> - Due dates shift based on actual progress
+> - New risks and blockers are logged immediately
+> - See Section 10 for recent updates
+
 ## 1) Purpose and Scope
 
 This document consolidates the RFC/PRD execution planning artifacts into one place:
@@ -9,10 +15,12 @@ This document consolidates the RFC/PRD execution planning artifacts into one pla
 - Definition of Done (DoD)
 - Milestones and release gates
 - Safety/compatibility gate checklists
+- **Development workflow and commands**
 
 Source docs:
 - [docs/rfc.md](rfc.md)
 - [docs/prd.md](prd.md)
+- [docs/learning/README.md](learning/README.md) - Learning resources
 - [Plan attachment](~/.cursor/plans/mac-fan-ctrl-ticketing-and-execution-plan_01d16d03.plan.md)
 
 ## 2) Execution Taxonomy
@@ -239,3 +247,84 @@ flowchart TD
 - Weekly: phase DoD + risks review
 - Safety dependency blockers move to `on-hold` with owner escalation
 - DoD sign-off required before RC transitions
+
+## 10) Development Workflow & Commands
+
+This project uses **pnpm** for package management and **Cargo** for Rust.
+
+### Quick Start
+
+```bash
+# Install dependencies
+pnpm install
+cd src-tauri && cargo fetch
+
+# Development mode
+pnpm tauri dev              # Full app with Rust backend
+pnpm dev                   # Frontend only (no SMC access)
+
+# Code quality
+pnpm biome:check           # Lint frontend
+pnpm test                  # Run Vitest
+pnpm playwright:test       # Run E2E tests
+cd src-tauri && cargo test # Run Rust tests
+
+# Build release
+pnpm tauri build           # Creates .app bundle
+```
+
+### Workspace Structure
+
+```
+mac-fan-ctrl/
+├── src/                   # Svelte frontend
+├── src-tauri/            # Rust backend
+├── docs/
+│   ├── rfc.md            # Technical design
+│   ├── prd.md            # Product requirements
+│   ├── task.md           # THIS FILE - ticketing
+│   └── learning/         # Learning resources
+└── pnpm-workspace.yaml   # pnpm workspace config
+```
+
+### Learning Resources
+
+See [docs/learning/README.md](learning/README.md) for:
+- Rust basics for this project
+- Tauri architecture
+- macOS SMC programming
+- System programming concepts
+- Development setup guide
+
+### Ticket Naming Convention
+
+```
+MACFAN-<epic>.<story>[-T<task>]
+
+Examples:
+- MACFAN-101.0     (Foundation epic)
+- MACFAN-101.0-T1  (Repository tooling task)
+- MACFAN-101.2     (Menu Bar + App Shell story)
+```
+
+### Making Changes
+
+1. **Update this file first** - Mark ticket status changes here
+2. **Commit with ticket reference**:
+   ```bash
+   git commit -m "MACFAN-101.0-T1: Add pnpm workspace config
+   
+   - Create pnpm-workspace.yaml
+   - Add learning documentation
+   - Update task.md workflow section"
+   ```
+3. **Move to In Progress** when starting work
+4. **Move to Done** after validation
+
+## 11) Change Log
+
+| Date | Change | Author |
+|------|--------|--------|
+| 2026-03-04 | Initial project setup with pnpm workspace, learning docs | - |
+| 2026-03-04 | Created learning/ directory with Rust and system programming guides | - |
+| 2026-03-04 | Created AGENTS.md with AI agent context and conventions | - |

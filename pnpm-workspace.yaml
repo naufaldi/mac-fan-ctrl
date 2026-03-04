@@ -1,0 +1,26 @@
+# mac-fan-ctrl PNPM Workspace Configuration
+# This project uses pnpm workspaces to manage the frontend and Tauri backend
+
+packages:
+  # Root package for the Svelte + Vite frontend
+  - '.'
+  # Tauri Rust backend (managed by Cargo, but referenced here for completeness)
+  - 'src-tauri'
+
+# Workspace-wide settings
+catalog:
+  # Shared devDependencies across workspace
+  typescript: '5.9.3'
+  vite: '6.3.0'
+
+# Only built dependencies (for native modules)
+onlyBuiltDependencies:
+  - '@biomejs/biome'
+  - '@tauri-apps/cli'
+
+# Hoist settings for Tauri compatibility
+hoistPattern:
+  - '*'
+
+# Strict peer dependencies
+strictPeerDependencies: true
