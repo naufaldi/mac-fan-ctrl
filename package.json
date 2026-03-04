@@ -1,0 +1,39 @@
+{
+	"name": "mac-fan-ctrl",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Svelte + Tauri vertical slice for MACFAN-101.0-T4",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"preview": "vite preview",
+		"tauri": "tauri",
+    "biome:check": "biome check . --linter-enabled=true --formatter-enabled=false",
+    "biome:format": "biome check . --formatter-enabled=true --linter-enabled=false",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:coverage": "vitest run --coverage",
+		"playwright:test": "playwright test"
+	},
+	"dependencies": {
+"@tauri-apps/api": "2.10.1"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.4.5",
+		"@playwright/test": "1.54.2",
+		"@sveltejs/vite-plugin-svelte": "6.2.4",
+		"@testing-library/jest-dom": "6.6.3",
+		"@testing-library/svelte": "5.3.1",
+		"@testing-library/user-event": "14.5.2",
+"@tauri-apps/cli": "2.10.0",
+		"@types/node": "22.10.2",
+    "happy-dom": "15.7.3",
+    "jsdom": "26.1.0",
+		"svelte": "5.53.7",
+    "svelte-check": "4.4.4",
+    "typescript": "5.9.3",
+    "vite": "6.3.0",
+    "vitest": "4.1.0-beta.5"
+	}
+}

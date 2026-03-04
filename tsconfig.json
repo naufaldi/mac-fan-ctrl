@@ -1,0 +1,23 @@
+{
+	"compilerOptions": {
+		"baseUrl": ".",
+		"paths": {
+			"@/*": ["src/*"],
+			"$lib/*": ["src/lib/*"],
+			"$components/*": ["src/components/*"],
+			"$stores/*": ["src/stores/*"],
+			"$types/*": ["src/types/*"]
+		},
+		"target": "ES2020",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"strict": true,
+		"allowImportingTsExtensions": true,
+		"resolveJsonModule": true,
+		"skipLibCheck": true,
+		"isolatedModules": true,
+		"noEmit": true,
+		"types": ["vitest/globals", "@testing-library/jest-dom", "vite/client"]
+	},
+	"include": ["src", "e2e", "*.ts", "*.config.ts", "*.config.js"]
+}

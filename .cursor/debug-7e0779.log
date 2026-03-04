@@ -1,0 +1,7 @@
+{"sessionId":"7e0779","location":"main.ts:4","message":"Script loaded - using Svelte 5 mount() API","data":{},"timestamp":1772603439501}
+{"sessionId":"7e0779","location":"App.svelte:6","message":"App.svelte script executing - component initializing","data":{},"timestamp":1772603439507}
+{"sessionId":"7e0779","location":"App.svelte:28","message":"Main template rendering - DOM element created","data":{},"timestamp":1772603439518}
+{"sessionId":"7e0779","location":"main.ts:16","message":"Svelte 5 mount() completed successfully","data":{},"timestamp":1772603439518}
+{"sessionId":"7e0779","location":"App.svelte:6","message":"App.svelte script executing - component initializing","data":{},"timestamp":1772603461844}
+{"sessionId":"7e0779","location":"App.svelte:28","message":"Main template rendering - DOM element created","data":{},"timestamp":1772603461849}
+{"sessionId":"7e0779","location":"App.svelte:28","message":"Main template rendering - DOM element created","data":{},"timestamp":1772603464551}

@@ -1,0 +1,8 @@
+{
+	"$schema": "../gen/schemas/desktop-schema.json",
+	"identifier": "default",
+	"description": "Default capability for local desktop UI",
+	"windows": ["main"],
+	"platforms": ["macOS", "linux", "windows"],
+	"permissions": ["core:default"]
+}

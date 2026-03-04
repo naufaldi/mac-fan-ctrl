@@ -1,0 +1,26 @@
+{
+	"$schema": "../node_modules/@tauri-apps/cli/schema.json",
+	"productName": "mac-fan-ctrl",
+	"version": "0.1.0",
+	"identifier": "com.example.mac-fan-ctrl",
+	"build": {
+		"beforeDevCommand": "pnpm run dev",
+		"beforeBuildCommand": "pnpm run build",
+		"devUrl": "http://localhost:5173",
+		"frontendDist": "../dist"
+	},
+	"app": {
+		"windows": [
+			{
+				"title": "mac-fan-ctrl",
+				"width": 960,
+				"height": 540
+			}
+		]
+	},
+	"bundle": {
+		"active": true,
+		"icon": []
+	},
+	"plugins": {}
+}
