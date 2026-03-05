@@ -9,6 +9,21 @@ export type SensorType =
   | "Other";
 
 export type SensorUnit = "C" | "W";
+export type SensorSource = "smc" | "iohid_iokit" | "derived" | "placeholder";
+export type NullReason = "placeholder" | "unsupported" | "read_error";
+
+export interface UnresolvedSensor {
+  provider: string;
+  raw_name: string;
+  reason: string;
+}
+
+export interface SensorDiagnostics {
+  model_id: string | null;
+  diagnostics_enabled: boolean;
+  active_providers: string[];
+  unresolved: UnresolvedSensor[];
+}
 
 export interface Sensor {
   key: string;
@@ -16,6 +31,8 @@ export interface Sensor {
   value: number | null;
   unit: SensorUnit;
   sensor_type: SensorType;
+  source?: SensorSource;
+  null_reason?: NullReason | null;
 }
 
 export interface SummarySensors {
@@ -28,4 +45,5 @@ export interface SummarySensors {
 export interface SensorData {
   summary: SummarySensors;
   details: Sensor[];
+  diagnostics?: SensorDiagnostics;
 }

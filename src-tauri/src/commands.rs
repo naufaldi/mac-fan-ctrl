@@ -1,4 +1,4 @@
-use crate::smc::SmcClient;
+use crate::smc::SensorService;
 
 pub const SENSOR_UPDATE_EVENT: &str = "sensor_update";
 
@@ -13,10 +13,8 @@ pub fn ping_backend(message: String) -> Result<String, String> {
 
 #[tauri::command]
 pub fn get_sensors() -> Result<crate::smc::SensorData, String> {
-    let mut client = SmcClient::new()
-        .map_err(|e| e.to_string())?;
-
-    client.read_all_sensors()
+    let mut service = SensorService::new();
+    service.read_all_sensors()
         .map_err(|e| e.to_string())
 }
 

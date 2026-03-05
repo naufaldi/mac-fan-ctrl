@@ -1,4 +1,5 @@
 mod commands;
+mod apple_silicon_sensors;
 mod smc;
 
 use std::thread;
@@ -29,26 +30,20 @@ fn bootstrap_menu_bar(app: &mut tauri::App) {
 
 fn start_sensor_stream(app_handle: tauri::AppHandle) {
 	thread::spawn(move || {
-		let mut client: Option<smc::SmcClient> = smc::SmcClient::new().ok();
+		let mut service = smc::SensorService::new();
 
 		loop {
-			if client.is_none() {
-				client = smc::SmcClient::new().ok();
-			}
-
-			if let Some(active_client) = client.as_mut() {
-				match active_client.read_all_sensors() {
-					Ok(sensor_data) => {
-						if let Err(error) =
-							app_handle.emit(commands::SENSOR_UPDATE_EVENT, sensor_data)
-						{
-							eprintln!("[mac-fan-ctrl] Failed to emit sensor_update event: {error}");
-						}
+			match service.read_all_sensors() {
+				Ok(sensor_data) => {
+					if let Err(error) =
+						app_handle.emit(commands::SENSOR_UPDATE_EVENT, sensor_data)
+					{
+						eprintln!("[mac-fan-ctrl] Failed to emit sensor_update event: {error}");
 					}
-					Err(error) => {
-						eprintln!("[mac-fan-ctrl] Sensor stream read failed: {error}");
-						client = None;
-					}
+				}
+				Err(error) => {
+					eprintln!("[mac-fan-ctrl] Sensor stream read failed: {error}");
+					service = smc::SensorService::new();
 				}
 			}
 
