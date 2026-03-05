@@ -148,6 +148,16 @@ pnpm tauri build      # Release bundle
 - Pattern match on enums with exhaustive handling
 - Never use `unwrap()` or `expect()` in production code
 
+### Design & UI Guidelines (Brand Guide)
+
+- **Strict Native macOS UI**: The application must look and feel indistinguishable from a first-party macOS system utility (like Activity Monitor) or high-quality native apps (like Macs Fan Control).
+- **Layout**: Use a classic split-pane window layout (Fans on left, Sensors on right). Avoid web-centric "floating cards" or loose spacing. Use edge-to-edge tables.
+- **Controls**: Mimic native macOS controls perfectly. Use native-looking Segmented Controls (connected buttons) for toggles, standard dropdowns, and native push buttons.
+- **Tables**: Use standard macOS table layouts with gray headers, vertical column dividers, and alternating row background colors (zebra striping: `odd:` / `even:`).
+- **Typography**: Strictly use system fonts (`SF Pro Text` for UI, `SF Mono` for data). Maintain high data density with small, crisp typography (e.g., 11px/12px for lists). Ensure tabular numbers (`font-variant-numeric: tabular-nums`) for all metrics.
+- **Icons**: Use SF Symbols for sensor icons (e.g., wifi, battery.100, cpu) to maintain native consistency.
+- **Colors**: Use semantic system colors that automatically adapt to light/dark mode, matching Apple's exact HIG hex values.
+
 ### Tauri Commands
 
 ```rust

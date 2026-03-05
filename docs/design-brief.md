@@ -3,22 +3,22 @@
 ## 1. Design Philosophy
 
 ### Core Principle
-mac-fan-ctrl follows the **Professional Utility** design approach - information-dense monitoring tools that respect macOS conventions while providing pro-level visibility. The design aligns with utilities like iStat Menus and Bartender: distinctly third-party but native-feeling, data-first, and immediately scannable.
+mac-fan-ctrl follows the **Strict Native macOS Utility** design approach. The UI must look and feel indistinguishable from a first-party macOS system utility (like Activity Monitor) or a high-quality native app (like Macs Fan Control). We avoid web-centric "card" designs, floating rounded boxes, or loose spacing in favor of edge-to-edge tables, standard system controls, and high data density.
 
 ### Key Characteristics
 
 | Characteristic | Implementation |
 |---------------|----------------|
-| **Data-first** | Numbers are the visual heroes; typography emphasizes readability |
-| **At-a-glance** | Status conveyed through color coding without cognitive load |
-| **Native respect** | System fonts (SF Pro, SF Mono), semantic colors, standard spacing |
-| **Predictable** | Users understand the interface instantly; no learning curve |
+| **Native Replication** | UI components must perfectly mimic macOS native controls (segmented controls, dropdowns, table headers). |
+| **Data-first Density** | Small, crisp typography (11px/12px) with tight spacing to maximize visible information. |
+| **Zebra Striping** | Tables and lists must use alternating row background colors (`odd:` / `even:`) for readability. |
+| **System Alignment** | Strict use of system fonts (SF Pro, SF Mono), semantic system colors, and native border styles. |
 
 ### macOS Alignment
-- Uses **SF Pro** for UI text and **SF Mono** for numeric displays
-- Follows **8pt grid system** (4px, 8px, 16px, 24px, 32px)
-- Adapts to **light/dark mode** automatically via system colors
-- Respects **accessibility settings** (dynamic type, reduced motion)
+- Uses **SF Pro Text** for UI text (11px-13px) and **SF Mono** for numeric displays.
+- Follows standard **macOS table layouts** (gray headers with vertical dividers, top/bottom borders).
+- Adapts to **light/dark mode** automatically via system colors, matching Apple's exact HIG hex values.
+- Uses **SF Symbols** for iconography (e.g., wifi, battery, cpu) instead of custom SVGs where possible.
 
 ---
 
@@ -104,66 +104,59 @@ Temperature states use system colors for automatic light/dark adaptation:
 
 ### 3.1 Layout Structure
 
-```
-┌─────────────────────────────────────────────┐
-│  CPU Package        GPU         RAM        │  ← Hero Row (3 cols)
-│   72°C ●            68°C ●      45°C ●     │
-│  [sparkline]                                  │
-├─────────────────────────────────────────────┤
-│  Fans                                       │
-│  Left: 2.4K ●     Right: 2.3K ●            │  ← Fan Section (2 cols)
-│  [sparkline]      [sparkline]              │
-├─────────────────────────────────────────────┤
-│  Battery    SSD    HDD                     │  ← Other Sensors (3 cols)
-│  35°C ●     42°C ●   N/A ●                 │
-└─────────────────────────────────────────────┘
-```
-
-### 3.2 Hero Row
-- **Sensors**: CPU Package, GPU, RAM (primary metrics)
-- **Layout**: 3-column grid, equal width
-- **Card Style**: Surface background, 16px padding, 8px radius
-- **Content**: Label + status dot, large numeric value, optional sparkline
-
-### 3.3 Fan Section
-- **Layout**: 2-column grid
-- **Content**: Fan name, RPM value with K notation (e.g., "2.4K"), 60-second sparkline
-- **Expandable**: Section can collapse/expand
-
-### 3.4 Secondary Sensors
-- **Sensors**: Battery, SSD, HDD, additional thermals
-- **Layout**: 3-column grid
-- **Fallback**: "N/A" for unavailable sensors with gray status
-
-### 3.5 Card Component Specification
+The application uses a classic macOS split-pane window layout, avoiding floating cards in favor of edge-to-edge content.
 
 ```
-┌─────────────────────────────┐
-│ Label               ●       │  ← 16px padding
-│                             │
-│ 72°C                        │  ← 24px font, tabular nums
-│                             │
-│ ~～～～～～～～～            │  ← Sparkline (optional)
-└─────────────────────────────┘
-     8px radius
+┌───────────────────────────────────────────────────────────┐
+│  Active preset: [ Automatic ▼ ]                [ ... ]    │  ← Header (Control Bar)
+├────────────────────────────────┬──────────────────────────┤
+│  Fan      Min/Current/Max RPM  │  Sensor         Value °C │  ← Native Table Headers
+├────────────────────────────────┼──────────────────────────┤
+│ ❖ Left    1200 - 2329 - 5779   │  [icon] Wi-Fi      49    │  ← Left: Fans (Flexible width)
+│  [Auto] [Custom...]            │  [icon] Battery    32    │  ← Right: Sensors (Fixed width)
+│                                │  [icon] CPU Core   69    │  ← Zebra striped rows
+│ ❖ Right   1200 - 2499 - 6241   │  [icon] GPU        68    │
+│  [Auto] [Custom...]            │                          │
+├────────────────────────────────┴──────────────────────────┤
+│  [Hide to menu bar]   [Preferences...]                [?] │  ← Footer
+└───────────────────────────────────────────────────────────┘
 ```
 
-**Card Properties:**
-- Background: `var(--color-surface-card)`
-- Border-radius: `var(--radius-card)` (8px)
-- Padding: `var(--spacing-4)` (16px)
-- No shadow (flat design)
-- Hover: `var(--color-surface-hover)`
+### 3.2 Header & Footer
+- **Header**: Contains the "Active preset" dropdown and standard window controls. Subtle bottom border.
+- **Footer**: Contains utility actions ("Hide to menu bar", "Preferences...", "Help"). Subtle top border.
+- **Buttons**: Must mimic native macOS push buttons (rounded rectangles with specific gradients/shadows or flat native styles depending on OS version).
 
-### 3.6 Sparkline Specification
+### 3.3 Fan Control Pane (Left)
+- **Layout**: Flexible width (`1fr`).
+- **Table Structure**: Edge-to-edge list.
+- **Columns**: "Fan", "Min/Current/Max RPM", "Control".
+- **Controls**: Must use native-looking Segmented Controls for the "Auto" / "Custom..." toggles. Do not use standalone rounded buttons.
+- **Row Styling**: Alternating background colors (zebra striping) or clear dividers.
 
-- **Height**: 24px
-- **Width**: 60px (scales with container)
-- **Stroke**: 2px, semantic color matching status
-- **Fill**: None (stroke only for minimal visual weight)
-- **Data Points**: 60 (one per second)
-- **Smoothing**: Simple line, no curves (performance)
-- **Animation**: None (static SVG path)
+### 3.4 Sensor List Pane (Right)
+- **Layout**: Fixed width (e.g., `300px`). Separated from the left pane by a standard 1px vertical divider.
+- **Table Structure**: Edge-to-edge list, scrollable.
+- **Columns**: "Sensor", "Value °C".
+- **Icons**: Use SF Symbols to represent sensor types (e.g., Wi-Fi, Battery, CPU).
+- **Row Styling**: Alternating background colors (zebra striping). No "Read More" expandable sections; just a standard scrollable list.
+
+### 3.5 Component Specifications
+
+#### Table Headers
+- Background: Native macOS table header gray.
+- Typography: 11px SF Pro Text, regular weight, dark gray text.
+- Borders: 1px bottom border, 1px vertical dividers between columns.
+
+#### Segmented Controls (Fan Controls)
+- Must perfectly mimic macOS segmented controls.
+- Connected buttons with a shared border.
+- Selected state uses native accent color or native selected gray.
+- Unselected state has a transparent/subtle background.
+
+#### Sensor Icons
+- Size: 14px - 16px.
+- Color: Semantic colors (e.g., blue for Wi-Fi, green for CPU) or standard macOS monochrome, matching native utility conventions.
 
 ---
 
