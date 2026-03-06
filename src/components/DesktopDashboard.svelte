@@ -18,6 +18,7 @@ const rawFans = $derived(sensorData?.fans ?? []);
 const sensors = $derived(sensorData?.details ?? []);
 
 let hasWriteAccess: boolean = $state(true);
+let bannerMessage: string = $state('Fan control requires elevated privileges.');
 
 $effect(() => {
 	getPrivilegeStatus()
@@ -25,11 +26,18 @@ $effect(() => {
 		.catch(() => { hasWriteAccess = false; });
 });
 
+const isDevMode = $derived(
+	bannerMessage.includes('development mode') || bannerMessage.includes('sudo pnpm')
+);
+
 async function handleGrantAccess(): Promise<void> {
 	try {
 		await requestPrivilegeRestart();
-	} catch {
-		// User cancelled or error — stay in current state
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		if (!msg.includes('cancelled') && !msg.includes('canceled')) {
+			bannerMessage = msg;
+		}
 	}
 }
 
@@ -46,16 +54,18 @@ const chromeButtonClass =
         "flex shrink-0 items-center justify-center gap-2 border-b border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 px-4 py-1.5 text-[11px] text-amber-800 dark:text-amber-200"
       )}
     >
-      <span>Fan control requires elevated privileges.</span>
-      <button
-        type="button"
-        class={cn(
-          "rounded-[4px] border border-amber-400 dark:border-amber-600 bg-amber-100 dark:bg-amber-800/50 px-2 py-0.5 text-[11px] font-medium text-amber-900 dark:text-amber-100 hover:bg-amber-200 dark:hover:bg-amber-700/50 transition-colors"
-        )}
-        onclick={handleGrantAccess}
-      >
-        Grant Access
-      </button>
+      <span>{bannerMessage}</span>
+      {#if !isDevMode}
+        <button
+          type="button"
+          class={cn(
+            "rounded-[4px] border border-amber-400 dark:border-amber-600 bg-amber-100 dark:bg-amber-800/50 px-2 py-0.5 text-[11px] font-medium text-amber-900 dark:text-amber-100 hover:bg-amber-200 dark:hover:bg-amber-700/50 transition-colors"
+          )}
+          onclick={handleGrantAccess}
+        >
+          Grant Access
+        </button>
+      {/if}
     </div>
   {/if}
 

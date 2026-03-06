@@ -34,7 +34,7 @@ fn bootstrap_menu_bar(app: &mut tauri::App) {
 	println!("[mac-fan-ctrl] Shell bootstrap complete");
 }
 
-fn run_fan_control_tick(app_handle: &tauri::AppHandle, sensor_data: &smc::SensorData) {
+fn run_fan_control_tick(app_handle: &tauri::AppHandle, sensor_data: &mut smc::SensorData) {
 	let state = app_handle.state::<AppState>();
 	if let Ok(writer_guard) = state.smc_writer.lock() {
 		if let Some(writer) = writer_guard.as_ref() {
@@ -46,6 +46,9 @@ fn run_fan_control_tick(app_handle: &tauri::AppHandle, sensor_data: &smc::Sensor
 				) {
 					eprintln!("[mac-fan-ctrl] Fan control tick failed: {error}");
 				}
+				// Overlay configured target/mode onto raw SMC data so the
+				// frontend displays the user's settings, not stale readbacks.
+				control.overlay_configs(&mut sensor_data.fans);
 			}
 		}
 	};
@@ -66,8 +69,8 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
 			if is_full_cycle {
 				// Full read: temperatures + fans (slow due to all_data() scan)
 				match service.read_all_sensors() {
-					Ok(sensor_data) => {
-						run_fan_control_tick(&app_handle, &sensor_data);
+					Ok(mut sensor_data) => {
+						run_fan_control_tick(&app_handle, &mut sensor_data);
 
 						if let Err(error) =
 							app_handle.emit(commands::SENSOR_UPDATE_EVENT, &sensor_data)

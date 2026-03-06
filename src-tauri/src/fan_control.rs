@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::smc::{FanData, Sensor};
+use crate::smc::{FanData, FanMode, Sensor};
 use crate::smc_writer::{SmcWriteError, SmcWriter};
 
 // ── Emergency thermal threshold ──────────────────────────────────────────────
@@ -70,6 +70,7 @@ impl FanControlState {
     }
 
     /// Removes a fan's config (returns it to Auto) and applies.
+    /// Re-locks thermal control if no fans remain in a forced mode.
     pub fn set_auto(
         &mut self,
         fan_index: u8,
@@ -77,6 +78,12 @@ impl FanControlState {
     ) -> Result<(), SmcWriteError> {
         writer.set_fan_auto(fan_index)?;
         self.configs.insert(fan_index, FanControlConfig::Auto);
+
+        // Re-lock thermal enforcement if all fans are now auto
+        let any_forced = self.configs.values().any(|c| !matches!(c, FanControlConfig::Auto));
+        if !any_forced {
+            let _ = writer.lock_fan_control();
+        }
         Ok(())
     }
 
@@ -155,7 +162,34 @@ impl FanControlState {
         Ok(())
     }
 
-    /// Restores all controlled fans to Auto mode.
+    /// Overlays active fan control configs onto raw SMC fan data.
+    ///
+    /// Apple Silicon often reads back `target = 0` from SMC even after a
+    /// successful write. This method patches the emitted `FanData` so the
+    /// frontend displays the user's configured values instead of stale SMC
+    /// readbacks.
+    pub fn overlay_configs(&self, fans: &mut [FanData]) {
+        for fan in fans.iter_mut() {
+            if let Some(config) = self.configs.get(&fan.index) {
+                match config {
+                    FanControlConfig::Auto => {
+                        fan.mode = FanMode::Auto;
+                    }
+                    FanControlConfig::ConstantRpm { target_rpm } => {
+                        fan.mode = FanMode::Forced;
+                        fan.target = *target_rpm;
+                    }
+                    FanControlConfig::SensorBased { .. } => {
+                        fan.mode = FanMode::Forced;
+                        // target is continuously updated by tick(); keep current value
+                    }
+                }
+            }
+        }
+    }
+
+    /// Restores all controlled fans to Auto mode and re-locks
+    /// thermal enforcement.
     pub fn restore_all_auto(&mut self, writer: &SmcWriter) {
         for (fan_index, _) in &self.configs {
             if let Err(error) = writer.set_fan_auto(*fan_index) {
@@ -166,6 +200,7 @@ impl FanControlState {
         }
         self.configs.clear();
         self.emergency_active = false;
+        let _ = writer.lock_fan_control();
     }
 }
 

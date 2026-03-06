@@ -61,6 +61,7 @@ pub fn set_fan_constant_rpm(
     fan_index: u8,
     rpm: f32,
 ) -> Result<(), String> {
+    eprintln!("[cmd] set_fan_constant_rpm: fan_index={fan_index} rpm={rpm}");
     let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
     let writer = writer_guard
         .as_ref()
@@ -69,13 +70,18 @@ pub fn set_fan_constant_rpm(
     let mut service = SensorService::new();
     let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
 
+    eprintln!("[cmd] fan data: {:?}", sensor_data.fans.iter().map(|f| format!("fan{}:min={} max={}", f.index, f.min, f.max)).collect::<Vec<_>>());
+
     let config = FanControlConfig::ConstantRpm { target_rpm: rpm };
-    state
+    let result = state
         .fan_control
         .lock()
         .map_err(|e| e.to_string())?
         .set_config(fan_index, config, &sensor_data.fans, writer)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+
+    eprintln!("[cmd] set_fan_constant_rpm result: {result:?}");
+    result
 }
 
 #[tauri::command]
@@ -253,13 +259,20 @@ pub fn request_privilege_restart(app_handle: tauri::AppHandle) -> Result<(), Str
         .filter(|p| p.extension().is_some_and(|ext| ext == "app"))
         .map(|p| p.to_path_buf());
 
-    // In a .app bundle: use `open -n` (returns immediately).
-    // In dev mode (raw binary): run the executable directly, backgrounded,
-    // because `open -n` doesn't work on plain binaries.
-    let shell_cmd = match app_bundle {
-        Some(ref bundle) => format!("open -n '{}'", bundle.to_string_lossy()),
-        None => format!("'{}' &>/dev/null &", exe_path.to_string_lossy()),
-    };
+    // Dev mode (no .app bundle): cannot restart because the Vite dev server
+    // is tied to the parent `pnpm tauri dev` process — killing the binary
+    // kills Vite too, leaving the new instance with a blank page.
+    let app_bundle = app_bundle.ok_or_else(|| {
+        "Cannot escalate privileges in development mode. Quit and restart with: sudo pnpm tauri dev".to_string()
+    })?;
+
+    // Production: run the inner binary directly as root.
+    // NOTE: `open -n` does NOT propagate root privileges (Launch Services
+    // always launches as the GUI user), so we must exec the binary directly.
+    let inner_binary = app_bundle.join("Contents/MacOS").join(
+        exe_path.file_name().unwrap_or_default()
+    );
+    let shell_cmd = format!("'{}' &>/dev/null &", inner_binary.to_string_lossy());
 
     let script = format!(
         "do shell script \"{shell_cmd}\" with administrator privileges"

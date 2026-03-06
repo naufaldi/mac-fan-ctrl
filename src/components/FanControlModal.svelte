@@ -63,6 +63,10 @@ const isPrivilegeError = $derived(
 	errorMessage.includes('root') || errorMessage.includes('privileges') || errorMessage.includes('not available')
 );
 
+const isDevModeError = $derived(
+	errorMessage.includes('development mode') || errorMessage.includes('sudo pnpm')
+);
+
 async function handleRestartWithPrivileges(): Promise<void> {
 	try {
 		await requestPrivilegeRestart();
@@ -228,7 +232,7 @@ const inputBase =
       {#if errorMessage}
         <div class={cn('text-[11px] text-center space-y-2')}>
           <p class="text-red-500">{errorMessage}</p>
-          {#if isPrivilegeError}
+          {#if isPrivilegeError && !isDevModeError}
             <button
               type="button"
               class={cn(buttonBase, 'border-amber-500 bg-amber-500 text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-amber-600')}
