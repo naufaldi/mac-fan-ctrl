@@ -1,6 +1,42 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use serde::Serialize;
+use tauri::State;
+
+use crate::fan_control::{FanControlConfig, FanControlState};
+use crate::presets::{self, Preset, PresetStore};
 use crate::smc::SensorService;
+use crate::smc_writer::SmcWriter;
 
 pub const SENSOR_UPDATE_EVENT: &str = "sensor_update";
+
+// ── App state shared via Tauri ───────────────────────────────────────────────
+
+pub struct AppState {
+    pub fan_control: Mutex<FanControlState>,
+    pub smc_writer: Mutex<Option<SmcWriter>>,
+    pub preset_store: Mutex<PresetStore>,
+}
+
+impl AppState {
+    pub fn new() -> Self {
+        let writer = SmcWriter::new()
+            .map_err(|e| {
+                eprintln!("[mac-fan-ctrl] SMC writer init failed (fan control disabled): {e}");
+                e
+            })
+            .ok();
+
+        Self {
+            fan_control: Mutex::new(FanControlState::new()),
+            smc_writer: Mutex::new(writer),
+            preset_store: Mutex::new(presets::load_preset_store()),
+        }
+    }
+}
+
+// ── Existing commands ────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub fn ping_backend(message: String) -> Result<String, String> {
@@ -14,9 +50,242 @@ pub fn ping_backend(message: String) -> Result<String, String> {
 #[tauri::command]
 pub fn get_sensors() -> Result<crate::smc::SensorData, String> {
     let mut service = SensorService::new();
-    service.read_all_sensors()
+    service.read_all_sensors().map_err(|e| e.to_string())
+}
+
+// ── Fan control commands ─────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn set_fan_constant_rpm(
+    state: State<'_, AppState>,
+    fan_index: u8,
+    rpm: f32,
+) -> Result<(), String> {
+    let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
+    let writer = writer_guard
+        .as_ref()
+        .ok_or_else(|| "SMC writer not available — fan control requires root".to_string())?;
+
+    let mut service = SensorService::new();
+    let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
+
+    let config = FanControlConfig::ConstantRpm { target_rpm: rpm };
+    state
+        .fan_control
+        .lock()
+        .map_err(|e| e.to_string())?
+        .set_config(fan_index, config, &sensor_data.fans, writer)
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn set_fan_sensor_control(
+    state: State<'_, AppState>,
+    fan_index: u8,
+    sensor_key: String,
+    temp_low: f32,
+    temp_high: f32,
+) -> Result<(), String> {
+    let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
+    let writer = writer_guard
+        .as_ref()
+        .ok_or_else(|| "SMC writer not available — fan control requires root".to_string())?;
+
+    let mut service = SensorService::new();
+    let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
+
+    let config = FanControlConfig::SensorBased {
+        sensor_key,
+        temp_low,
+        temp_high,
+    };
+    state
+        .fan_control
+        .lock()
+        .map_err(|e| e.to_string())?
+        .set_config(fan_index, config, &sensor_data.fans, writer)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_fan_auto(state: State<'_, AppState>, fan_index: u8) -> Result<(), String> {
+    let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
+    let writer = writer_guard
+        .as_ref()
+        .ok_or_else(|| "SMC writer not available — fan control requires root".to_string())?;
+
+    state
+        .fan_control
+        .lock()
+        .map_err(|e| e.to_string())?
+        .set_auto(fan_index, writer)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_fan_control_configs(
+    state: State<'_, AppState>,
+) -> Result<HashMap<u8, FanControlConfig>, String> {
+    let guard = state.fan_control.lock().map_err(|e| e.to_string())?;
+    Ok(guard.configs().clone())
+}
+
+// ── Preset commands ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_presets(state: State<'_, AppState>) -> Result<Vec<Preset>, String> {
+    let store = state.preset_store.lock().map_err(|e| e.to_string())?;
+
+    // Get current fan info for Full Blast preset
+    let mut service = SensorService::new();
+    let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
+
+    let fan_indices: Vec<u8> = sensor_data.fans.iter().map(|f| f.index).collect();
+    let fan_maxes: HashMap<u8, f32> = sensor_data
+        .fans
+        .iter()
+        .map(|f| (f.index, f.max))
+        .collect();
+
+    Ok(presets::all_presets(&store, &fan_indices, &fan_maxes))
+}
+
+#[tauri::command]
+pub fn get_active_preset(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let store = state.preset_store.lock().map_err(|e| e.to_string())?;
+    Ok(store.active_preset.clone())
+}
+
+#[tauri::command]
+pub fn apply_preset(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
+    let writer = writer_guard
+        .as_ref()
+        .ok_or_else(|| "SMC writer not available — fan control requires root".to_string())?;
+
+    let mut service = SensorService::new();
+    let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
+
+    let fan_indices: Vec<u8> = sensor_data.fans.iter().map(|f| f.index).collect();
+    let fan_maxes: HashMap<u8, f32> = sensor_data
+        .fans
+        .iter()
+        .map(|f| (f.index, f.max))
+        .collect();
+
+    let mut store = state.preset_store.lock().map_err(|e| e.to_string())?;
+    let all = presets::all_presets(&store, &fan_indices, &fan_maxes);
+
+    let preset = all
+        .iter()
+        .find(|p| p.name == name)
+        .ok_or_else(|| format!("Preset '{}' not found", name))?;
+
+    let mut fan_control = state.fan_control.lock().map_err(|e| e.to_string())?;
+
+    // First restore all fans to auto
+    fan_control.restore_all_auto(writer);
+
+    // Then apply preset configs
+    for (fan_index, config) in &preset.configs {
+        fan_control
+            .set_config(*fan_index, config.clone(), &sensor_data.fans, writer)
+            .map_err(|e| e.to_string())?;
+    }
+
+    store.active_preset = Some(name);
+    presets::save_preset_store(&store).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn save_preset(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    let fan_control = state.fan_control.lock().map_err(|e| e.to_string())?;
+    let configs = fan_control.configs().clone();
+
+    let preset = Preset {
+        name: name.clone(),
+        builtin: false,
+        configs,
+    };
+
+    let mut store = state.preset_store.lock().map_err(|e| e.to_string())?;
+    presets::save_custom_preset(&mut store, preset)?;
+    store.active_preset = Some(name);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_preset(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    let mut store = state.preset_store.lock().map_err(|e| e.to_string())?;
+    presets::delete_custom_preset(&mut store, &name)
+}
+
+// ── Privilege commands ───────────────────────────────────────────────────────
+
+#[derive(Serialize, Clone)]
+pub struct PrivilegeStatus {
+    pub has_write_access: bool,
+}
+
+#[tauri::command]
+pub fn get_privilege_status(state: State<'_, AppState>) -> Result<PrivilegeStatus, String> {
+    let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
+    Ok(PrivilegeStatus {
+        has_write_access: writer_guard.is_some(),
+    })
+}
+
+#[tauri::command]
+pub fn request_privilege_restart(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get executable path: {e}"))?;
+
+    // Look for the .app bundle by traversing up from the binary
+    // Binary is at: MyApp.app/Contents/MacOS/my-app
+    let app_bundle = exe_path
+        .parent() // MacOS/
+        .and_then(|p| p.parent()) // Contents/
+        .and_then(|p| p.parent()) // MyApp.app/
+        .filter(|p| p.extension().is_some_and(|ext| ext == "app"))
+        .map(|p| p.to_path_buf());
+
+    // In a .app bundle: use `open -n` (returns immediately).
+    // In dev mode (raw binary): run the executable directly, backgrounded,
+    // because `open -n` doesn't work on plain binaries.
+    let shell_cmd = match app_bundle {
+        Some(ref bundle) => format!("open -n '{}'", bundle.to_string_lossy()),
+        None => format!("'{}' &>/dev/null &", exe_path.to_string_lossy()),
+    };
+
+    let script = format!(
+        "do shell script \"{shell_cmd}\" with administrator privileges"
+    );
+
+    let result = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to launch osascript: {e}"))?;
+
+    if !result.status.success() {
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        // User cancelled the auth dialog — not an error
+        if stderr.contains("User canceled") || stderr.contains("-128") {
+            return Err("User cancelled the authorization request".to_string());
+        }
+        return Err(format!("osascript failed: {stderr}"));
+    }
+
+    // Exit current unprivileged instance
+    app_handle.exit(0);
+    Ok(())
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

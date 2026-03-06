@@ -37,7 +37,7 @@ fn to_celsius(raw: f64) -> f64 {
 fn normalize_name(raw_name: &str) -> Option<(&'static str, &'static str, &'static str)> {
     let lower = raw_name.to_lowercase();
     if lower.contains("nand") {
-        return Some(("SSD", "APPLE SSD", "Storage"));
+        return Some(("TN0n", "APPLE SSD", "Storage"));
     }
     if lower.contains("gas gauge") {
         return Some(("TB1T", "Battery Gas Gauge", "Battery"));

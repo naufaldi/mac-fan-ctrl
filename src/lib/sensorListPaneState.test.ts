@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+	getAllSensorsForDisplay,
 	getDetailSensorsInDisplayOrder,
 	getReadMoreLabel,
 	getSummarySensorsForDisplay,
-	getAllSensorsForDisplay,
-	shouldShowReadMore,
+	isPerCoreTemperatureUnavailable,
 	SUMMARY_SENSOR_LIMIT,
+	shouldShowReadMore,
 } from "./sensorListPaneState";
 import type { SensorData } from "./types";
+
+const emptyFans = { fans: [] as SensorData["fans"] };
 
 describe("sensorListPaneState", () => {
 	it("enables Read More only above summary limit", () => {
@@ -23,6 +26,7 @@ describe("sensorListPaneState", () => {
 
 	it("builds fixed top list with CPU average, Battery, and GPU average", () => {
 		const sensorData: SensorData = {
+			...emptyFans,
 			summary: {
 				cpu_package: null,
 				gpu: null,
@@ -80,6 +84,7 @@ describe("sensorListPaneState", () => {
 
 	it("orders detailed sensors by category for read more", () => {
 		const sensorData: SensorData = {
+			...emptyFans,
 			summary: {
 				cpu_package: null,
 				gpu: null,
@@ -120,6 +125,7 @@ describe("sensorListPaneState", () => {
 
 	it("combines and orders all sensors for flat display", () => {
 		const sensorData: SensorData = {
+			...emptyFans,
 			summary: {
 				cpu_package: null,
 				gpu: null,
@@ -188,7 +194,8 @@ describe("sensorListPaneState", () => {
 
 		const allSensors = getAllSensorsForDisplay(sensorData);
 
-		expect(allSensors.slice(0, 15).map((sensor) => sensor.name)).toEqual([
+		// Temperature sensors with no data on this hardware are hidden; storage sensors remain
+		expect(allSensors.map((sensor) => sensor.name)).toEqual([
 			"Airport Proximity",
 			"Battery",
 			"Battery Gas Gauge",
@@ -196,14 +203,11 @@ describe("sensorListPaneState", () => {
 			"CPU Efficiency Core 1",
 			"CPU Efficiency Core 2",
 			"CPU Performance Core 1",
-			"CPU Performance Core 2",
-			"CPU Performance Core 3",
-			"CPU Performance Core 4",
-			"CPU Performance Core 5",
-			"CPU Performance Core 6",
 			"GPU Cluster 1",
 			"GPU Cluster 2",
 			"GPU Cluster Average",
+			"Disk Drives:",
+			"APPLE SSD",
 		]);
 
 		expect(allSensors.find((sensor) => sensor.name === "Disk Drives:")?.value).toBeNull();
@@ -211,8 +215,9 @@ describe("sensorListPaneState", () => {
 		expect(allSensors.find((sensor) => sensor.name === "GPU Cluster Average")?.value).toBe(59);
 	});
 
-	it("prefers key match over name and keeps placeholder diagnostics", () => {
+	it("prefers key match over name and hides sensors with no data on this hardware", () => {
 		const sensorData: SensorData = {
+			...emptyFans,
 			summary: {
 				cpu_package: null,
 				gpu: null,
@@ -238,7 +243,158 @@ describe("sensorListPaneState", () => {
 
 		expect(memoryBank?.name).toBe("Memory Bank Primary");
 		expect(memoryBank?.value).toBe(54);
-		expect(missingTrackpad?.source).toBe("placeholder");
-		expect(missingTrackpad?.null_reason).toBe("placeholder");
+		// Trackpad not present on this hardware — hidden rather than shown as N/A
+		expect(missingTrackpad).toBeUndefined();
+	});
+
+	it("filters noisy dynamic cpu labels from flat display", () => {
+		const sensorData: SensorData = {
+			...emptyFans,
+			summary: {
+				cpu_package: null,
+				gpu: null,
+				ram: null,
+				ssd: null,
+			},
+			details: [
+				{
+					key: "TCPUAVG",
+					name: "CPU Core Average",
+					value: 65,
+					unit: "C",
+					sensor_type: "Cpu",
+				},
+				{
+					key: "TC0C",
+					name: "CPU Efficiency Core 1",
+					value: 63,
+					unit: "C",
+					sensor_type: "Cpu",
+				},
+				{
+					key: "TPD1",
+					name: "Dynamic CPU TPD1",
+					value: 61,
+					unit: "C",
+					sensor_type: "Cpu",
+				},
+			],
+		};
+
+		const allSensors = getAllSensorsForDisplay(sensorData);
+		const names = allSensors.map((sensor) => sensor.name);
+
+		expect(names).toContain("CPU Core Average");
+		expect(names).toContain("CPU Efficiency Core 1");
+		expect(names).not.toContain("Dynamic CPU TPD1");
+	});
+
+	it("uses detected cpu core rows without fixed placeholder core catalog", () => {
+		const sensorData: SensorData = {
+			...emptyFans,
+			summary: {
+				cpu_package: null,
+				gpu: null,
+				ram: null,
+				ssd: null,
+			},
+			details: [
+				{
+					key: "TCPUAVG",
+					name: "CPU Core Average",
+					value: 71,
+					unit: "C",
+					sensor_type: "Cpu",
+				},
+				{
+					key: "TC0C",
+					name: "CPU Efficiency Core 1",
+					value: 70,
+					unit: "C",
+					sensor_type: "Cpu",
+				},
+			],
+		};
+
+		const allSensors = getAllSensorsForDisplay(sensorData);
+		const cpuNames = allSensors
+			.filter((sensor) => sensor.sensor_type === "Cpu")
+			.map((sensor) => sensor.name);
+
+		expect(cpuNames).toEqual(["CPU Core Average", "CPU Efficiency Core 1"]);
+	});
+
+	it("reports per-core temperature unavailable when diagnostics flag is false", () => {
+		const sensorData: SensorData = {
+			...emptyFans,
+			summary: {
+				cpu_package: null,
+				gpu: null,
+				ram: null,
+				ssd: null,
+			},
+			details: [],
+			diagnostics: {
+				model_id: "MacBookPro18,3",
+				diagnostics_enabled: false,
+				active_providers: ["smc"],
+				unresolved: [],
+				per_core_cpu_temp_available: false,
+			},
+		};
+
+		expect(isPerCoreTemperatureUnavailable(sensorData)).toBe(true);
+	});
+
+	it("hides catalog sensors whose value is null (not available on this hardware)", () => {
+		const sensorData: SensorData = {
+			...emptyFans,
+			summary: { cpu_package: null, gpu: null, ram: null, ssd: null },
+			// TM0P and TM1P not present → will become null placeholders
+			details: [
+				{ key: "TG0D", name: "GPU Cluster 1", value: 55, unit: "C", sensor_type: "Gpu" },
+			],
+		};
+
+		const names = getAllSensorsForDisplay(sensorData).map((s) => s.name);
+
+		expect(names).not.toContain("Memory Bank 1");
+		expect(names).not.toContain("Memory Bank 2");
+		expect(names).toContain("GPU Cluster 1");
+	});
+
+	it("excludes uncataloged non-CPU sensors from flat display", () => {
+		const sensorData: SensorData = {
+			...emptyFans,
+			summary: { cpu_package: null, gpu: null, ram: null, ssd: null },
+			details: [
+				{ key: "Tg04", name: "Dynamic GPU Tg04", value: 45, unit: "C", sensor_type: "Gpu" },
+				{ key: "Tm00", name: "Dynamic Memory Tm00", value: 38, unit: "C", sensor_type: "Memory" },
+				{ key: "TG0D", name: "GPU Cluster 1", value: 60, unit: "C", sensor_type: "Gpu" },
+			],
+		};
+
+		const allSensors = getAllSensorsForDisplay(sensorData);
+		const names = allSensors.map((s) => s.name);
+
+		expect(names).not.toContain("Dynamic GPU Tg04");
+		expect(names).not.toContain("Dynamic Memory Tm00");
+		expect(names).toContain("GPU Cluster 1");
+	});
+
+	it("does not report per-core unavailable when diagnostics are missing", () => {
+		const sensorData: SensorData = {
+			...emptyFans,
+			summary: {
+				cpu_package: null,
+				gpu: null,
+				ram: null,
+				ssd: null,
+			},
+			details: [],
+		};
+
+		expect(isPerCoreTemperatureUnavailable(sensorData)).toBe(false);
+		expect(isPerCoreTemperatureUnavailable(null)).toBe(false);
 	});
 });

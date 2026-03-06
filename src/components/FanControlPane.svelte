@@ -2,33 +2,99 @@
   import { cn } from '$lib/cn';
   import { toFanRows } from '$lib/dashboardLayout';
   import type { SensorData } from '$lib/designTokens';
+  import type { FanData, Sensor } from '$lib/types';
+  import { setFanAuto, requestPrivilegeRestart } from '$lib/tauriCommands';
   import { Fan as FanIcon } from 'lucide-svelte';
+  import FanControlModal from './FanControlModal.svelte';
 
   interface Props {
     fans: SensorData[];
+    rawFans: FanData[];
+    sensors: Sensor[];
+    hasWriteAccess: boolean;
   }
 
-  const { fans }: Props = $props();
+  const { fans, rawFans, sensors, hasWriteAccess }: Props = $props();
 
   const fanRows = $derived(toFanRows(fans));
   const controlBaseClass =
-    'px-3 py-0.5 text-xs text-center transition-colors focus-visible:outline-none';
+    'rounded-full text-[11px] px-3 py-0.5 text-center transition-colors focus-visible:outline-none cursor-pointer';
   const controlInactiveClass =
-    'bg-(--surface-1) text-(--text-secondary) hover:bg-(--surface-hover)';
+    'border border-(--border-subtle) bg-(--surface-1) text-(--text-secondary) hover:bg-(--surface-hover)';
   const controlActiveClass =
-    'bg-gray-400/20 dark:bg-gray-500/30 text-(--text-primary) font-medium shadow-sm';
+    'bg-amber-500/20 border border-amber-500/40 text-amber-700 dark:bg-amber-400/15 dark:border-amber-400/30 dark:text-amber-300 font-medium';
+
+  // ── Modal state ──────────────────────────────────────────────────────────
+
+  let modalFan: FanData | null = $state(null);
+  let privilegeError: string | null = $state(null);
+
+  function openCustomModal(fanIndex: number): void {
+    const fan = rawFans.find((f) => f.index === fanIndex);
+    if (fan) {
+      modalFan = fan;
+    }
+  }
+
+  function closeModal(): void {
+    modalFan = null;
+  }
+
+  function isPrivilegeError(error: unknown): boolean {
+    const msg = error instanceof Error ? error.message : String(error);
+    return msg.includes('root') || msg.includes('privileges') || msg.includes('not available');
+  }
+
+  async function handleAutoClick(fanIndex: number): Promise<void> {
+    privilegeError = null;
+    try {
+      await setFanAuto(fanIndex);
+    } catch (error) {
+      if (isPrivilegeError(error)) {
+        privilegeError = 'Fan control requires elevated privileges.';
+      } else {
+        console.error('[mac-fan-ctrl] Failed to set fan to auto:', error);
+      }
+    }
+  }
+
+  async function handleRestartWithPrivileges(): Promise<void> {
+    try {
+      await requestPrivilegeRestart();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes('cancelled') || msg.includes('canceled')) {
+        privilegeError = null;
+      } else {
+        console.error('[mac-fan-ctrl] Privilege restart failed:', error);
+      }
+    }
+  }
 </script>
 
 <section class={cn("min-h-0 overflow-y-auto border-r border-(--border-subtle) bg-(--surface-1)")}>
   <!-- Header -->
   <div
-    class={cn("sticky top-0 grid grid-cols-[100px_1fr_160px] items-center border-b border-(--border-subtle) bg-(--surface-2) text-[11px] font-medium text-gray-600 dark:text-gray-300")}
+    class={cn("sticky top-0 grid grid-cols-[100px_1fr_280px] items-center border-b border-(--border-subtle) bg-(--surface-2) text-[11px] font-medium text-gray-600 dark:text-gray-300")}
     role="row"
   >
     <div class="px-2 py-1 flex items-center border-r border-(--border-subtle)">Fan</div>
     <div class="px-2 py-1 flex items-center border-r border-(--border-subtle)">Min/Current/Max RPM</div>
     <div class="px-2 py-1 flex items-center">Control</div>
   </div>
+
+  {#if privilegeError}
+    <div class={cn("flex items-center justify-between gap-2 border-b border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 px-3 py-1.5 text-[11px] text-amber-800 dark:text-amber-200")}>
+      <span>{privilegeError}</span>
+      <button
+        type="button"
+        class={cn("shrink-0 rounded-[4px] border border-amber-400 dark:border-amber-600 bg-amber-100 dark:bg-amber-800/50 px-2 py-0.5 text-[11px] font-medium text-amber-900 dark:text-amber-100 hover:bg-amber-200 dark:hover:bg-amber-700/50 transition-colors")}
+        onclick={handleRestartWithPrivileges}
+      >
+        Restart with Admin Privileges
+      </button>
+    </div>
+  {/if}
 
   <div class={cn("flex flex-col")}>
     {#if fanRows.length === 0}
@@ -39,7 +105,7 @@
       {#each fanRows as fan (fan.id)}
         <div
           class={cn(
-            "grid grid-cols-[100px_1fr_160px] items-center odd:bg-(--surface-1) even:bg-(--surface-2) hover:bg-(--surface-hover)"
+            "grid grid-cols-[100px_1fr_280px] items-center odd:bg-(--surface-1) even:bg-(--surface-2) hover:bg-(--surface-hover)"
           )}
           role="row"
         >
@@ -56,33 +122,36 @@
             <span class="text-(--text-muted)">-</span>
             <span class={cn("text-(--text-muted)")}>{fan.maxRpm}</span>
           </div>
-          <div class={cn("px-2 py-1 flex items-center justify-start")}>
-            <div class="flex rounded-md border border-(--border-subtle) bg-(--surface-1) overflow-hidden shadow-sm">
-              <button
-                type="button"
-                class={cn(
-                  controlBaseClass,
-                  "border-r border-(--border-subtle)",
-                  fan.controlMode === 'auto' ? controlActiveClass : controlInactiveClass
-                )}
-                aria-label={`Set ${fan.label} to auto mode`}
-              >
-                Auto
-              </button>
-              <button
-                type="button"
-                class={cn(
-                  controlBaseClass,
-                  fan.controlMode === 'constant' ? controlActiveClass : controlInactiveClass
-                )}
-                aria-label={`Set ${fan.label} to custom mode`}
-              >
-                Custom...
-              </button>
-            </div>
+          <div class={cn("px-2 py-1 flex items-center justify-center gap-2")}>
+            <button
+              type="button"
+              class={cn(
+                controlBaseClass,
+                fan.controlMode === 'auto' ? controlActiveClass : controlInactiveClass
+              )}
+              aria-label={`Set ${fan.label} to auto mode`}
+              onclick={() => handleAutoClick(fan.fanIndex)}
+            >
+              Auto
+            </button>
+            <button
+              type="button"
+              class={cn(
+                controlBaseClass,
+                fan.controlMode === 'constant' ? controlActiveClass : controlInactiveClass
+              )}
+              aria-label={`Set ${fan.label} to custom mode`}
+              onclick={() => openCustomModal(fan.fanIndex)}
+            >
+              {fan.controlMode === 'constant' ? `Constant value of ${fan.targetRpm}` : 'Custom...'}
+            </button>
           </div>
         </div>
       {/each}
     {/if}
   </div>
 </section>
+
+{#if modalFan}
+  <FanControlModal fan={modalFan} {sensors} onclose={closeModal} />
+{/if}

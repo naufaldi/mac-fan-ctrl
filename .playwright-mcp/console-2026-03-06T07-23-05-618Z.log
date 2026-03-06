@@ -1,0 +1,56 @@
+[     178ms] [ERROR] [mac-fan-ctrl] Failed to fetch initial sensors: TypeError: Cannot read properties of undefined (reading 'invoke')
+    at invoke (http://localhost:5173/node_modules/.vite/deps/chunk-ES5NGWZA.js?v=d9729774:109:37)
+    at getSensors (http://localhost:5173/src/lib/tauriCommands.ts:8:10)
+    at init (http://localhost:5173/src/App.svelte:45:52)
+    at $effect (http://localhost:5173/src/App.svelte:66:8)
+    at update_reaction (http://localhost:5173/node_modules/.vite/deps/chunk-RLUWTRQA.js?v=d9729774:3556:18)
+    at update_effect (http://localhost:5173/node_modules/.vite/deps/chunk-RLUWTRQA.js?v=d9729774:3695:21)
+    at flush_queued_effects (http://localhost:5173/node_modules/.vite/deps/chunk-RLUWTRQA.js?v=d9729774:2672:7)
+    at _Batch.process (http://localhost:5173/node_modules/.vite/deps/chunk-RLUWTRQA.js?v=d9729774:2328:7)
+    at flush_effects (http://localhost:5173/node_modules/.vite/deps/chunk-RLUWTRQA.js?v=d9729774:2630:13)
+    at _Batch.flush (http://localhost:5173/node_modules/.vite/deps/chunk-RLUWTRQA.js?v=d9729774:2364:7) @ http://localhost:5173/src/App.svelte:48
+[     178ms] [ERROR] [mac-fan-ctrl] Failed to load presets: TypeError: Cannot read properties of undefined (reading 'invoke')
+    at invoke (http://localhost:5173/node_modules/.vite/deps/chunk-ES5NGWZA.js?v=d9729774:109:37)
+    at getPresets (http://localhost:5173/src/lib/tauriCommands.ts:36:10)
+    at refreshPresets (http://localhost:5173/src/components/PresetDropdown.svelte:50:84)
+    at $effect (http://localhost:5173/src/components/PresetDropdown.svelte:60:8)
+    at update_reaction (http://localhost:5173/node_modules/.vite/deps/chunk-RLUWTRQA.js?v=d9729774:3556:18)
+    at update_effect (http://localhost:5173/node_modules/.vite/deps/chunk-RLUWTRQA.js?v=d9729774:3695:21)
+    at flush_queued_effects (http://localhost:5173/node_modules/.vite/deps/chunk-RLUWTRQA.js?v=d9729774:2672:7)
+    at _Batch.process (http://localhost:5173/node_modules/.vite/deps/chunk-RLUWTRQA.js?v=d9729774:2328:7)
+    at flush_effects (http://localhost:5173/node_modules/.vite/deps/chunk-RLUWTRQA.js?v=d9729774:2630:13)
+    at _Batch.flush (http://localhost:5173/node_modules/.vite/deps/chunk-RLUWTRQA.js?v=d9729774:2364:7) @ http://localhost:5173/src/components/PresetDropdown.svelte:54
+[     178ms] [ERROR] [mac-fan-ctrl] Failed to subscribe: TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:5173/node_modules/.vite/deps/chunk-ES5NGWZA.js?v=d9729774:22:37)
+    at listen (http://localhost:5173/node_modules/.vite/deps/@tauri-apps_api_event.js?v=d9729774:38:14)
+    at listenToSensorUpdates (http://localhost:5173/src/lib/tauriCommands.ts:11:10)
+    at init (http://localhost:5173/src/App.svelte:53:47) @ http://localhost:5173/src/App.svelte:61
+[     197ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5173/favicon.ico:0
+[   13579ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   14581ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   15587ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   16593ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   17595ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   18597ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   19599ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   20601ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   21604ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   22608ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   23613ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   24622ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   25637ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   26644ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   27657ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   28684ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   29722ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   30736ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   31805ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   32884ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   33969ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   35115ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   36395ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   37692ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   38956ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   40495ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   42053ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034
+[   43958ms] [ERROR] WebSocket connection to 'ws://localhost:5173/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/@vite/client:1034

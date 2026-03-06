@@ -14,17 +14,19 @@ const TARGET_CATALOG: ReadonlyArray<CatalogRow> = [
 	{ key: "TB0T", name: "Battery", unit: "C", sensor_type: "Battery" },
 	{ key: "TB1T", name: "Battery Gas Gauge", unit: "C", sensor_type: "Battery" },
 	{ key: "TCPUAVG", name: "CPU Core Average", unit: "C", sensor_type: "Cpu" },
-	{ key: "TCE1", name: "CPU Efficiency Core 1", unit: "C", sensor_type: "Cpu" },
-	{ key: "TCE2", name: "CPU Efficiency Core 2", unit: "C", sensor_type: "Cpu" },
-	{ key: "TCP1", name: "CPU Performance Core 1", unit: "C", sensor_type: "Cpu" },
-	{ key: "TCP2", name: "CPU Performance Core 2", unit: "C", sensor_type: "Cpu" },
-	{ key: "TCP3", name: "CPU Performance Core 3", unit: "C", sensor_type: "Cpu" },
-	{ key: "TCP4", name: "CPU Performance Core 4", unit: "C", sensor_type: "Cpu" },
-	{ key: "TCP5", name: "CPU Performance Core 5", unit: "C", sensor_type: "Cpu" },
-	{ key: "TCP6", name: "CPU Performance Core 6", unit: "C", sensor_type: "Cpu" },
+	{ key: "TP0b", name: "CPU Efficiency Cluster 1", unit: "C", sensor_type: "Cpu" },
+	{ key: "TP1b", name: "CPU Efficiency Cluster 2", unit: "C", sensor_type: "Cpu" },
+	{ key: "TP2b", name: "CPU Performance Cluster", unit: "C", sensor_type: "Cpu" },
 	{ key: "TG0D", name: "GPU Cluster 1", unit: "C", sensor_type: "Gpu" },
 	{ key: "TG0P", name: "GPU Cluster 2", unit: "C", sensor_type: "Gpu" },
 	{ key: "TGAVG", name: "GPU Cluster Average", unit: "C", sensor_type: "Gpu" },
+	{ key: "TaLC", name: "Airflow Left", unit: "C", sensor_type: "Other" },
+	{ key: "TaRC", name: "Airflow Right", unit: "C", sensor_type: "Other" },
+	{ key: "Th1H", name: "Heatpipe 1", unit: "C", sensor_type: "Other" },
+	{ key: "Th2H", name: "Heatpipe 2", unit: "C", sensor_type: "Other" },
+	{ key: "Tm0P", name: "Mainboard", unit: "C", sensor_type: "Other" },
+	{ key: "TTLD", name: "Thunderbolt Left", unit: "C", sensor_type: "Other" },
+	{ key: "TTRD", name: "Thunderbolt Right", unit: "C", sensor_type: "Other" },
 	{ key: "TM0P", name: "Memory Bank 1", unit: "C", sensor_type: "Memory" },
 	{ key: "TM1P", name: "Memory Bank 2", unit: "C", sensor_type: "Memory" },
 	{ key: "TPCD", name: "Power Manager Die Average", unit: "C", sensor_type: "Power" },
@@ -32,11 +34,8 @@ const TARGET_CATALOG: ReadonlyArray<CatalogRow> = [
 	{ key: "Ts0P", name: "Trackpad", unit: "C", sensor_type: "Trackpad" },
 	{ key: "Ts1P", name: "Trackpad Actuator", unit: "C", sensor_type: "Trackpad" },
 	{ key: "DISK_SECTION", name: "Disk Drives:", unit: "C", sensor_type: "Storage" },
-	{ key: "SSD", name: "APPLE SSD", unit: "C", sensor_type: "Storage" },
+	{ key: "TN0n", name: "APPLE SSD", unit: "C", sensor_type: "Storage" },
 ];
-
-const TARGET_SENSOR_NAMES = new Set(TARGET_CATALOG.map((row) => row.name));
-const TARGET_SENSOR_KEYS = new Set(TARGET_CATALOG.map((row) => row.key));
 
 const SENSOR_TYPE_ORDER: Record<SensorType, number> = {
 	Cpu: 0,
@@ -174,6 +173,107 @@ function ensureComputedRows(details: Sensor[]): Sensor[] {
 		: [...withCpuAverage, buildGpuAverageSensor(withCpuAverage)];
 }
 
+function isCpuAverageSensor(sensor: Sensor): boolean {
+	return sensor.key === "TCPUAVG" || sensor.name === "CPU Core Average";
+}
+
+type CpuCoreKind = "efficiency" | "performance" | "generic";
+
+type CpuCoreDescriptor = {
+	kind: CpuCoreKind;
+	index: number;
+};
+
+function toCpuCoreDescriptor(sensor: Sensor): CpuCoreDescriptor | null {
+	if (sensor.sensor_type !== "Cpu" || isCpuAverageSensor(sensor)) {
+		return null;
+	}
+
+	const normalizedName = sensor.name.trim();
+	if (/^dynamic cpu /i.test(normalizedName)) {
+		return null;
+	}
+
+	const efficiencyNameMatch = normalizedName.match(/^CPU Efficiency Core (\d+)$/i);
+	if (efficiencyNameMatch) {
+		return { kind: "efficiency", index: Number.parseInt(efficiencyNameMatch[1], 10) };
+	}
+
+	const performanceNameMatch = normalizedName.match(/^CPU Performance Core (\d+)$/i);
+	if (performanceNameMatch) {
+		return { kind: "performance", index: Number.parseInt(performanceNameMatch[1], 10) };
+	}
+
+	const genericNameMatch = normalizedName.match(/^CPU Core (\d+)$/i);
+	if (genericNameMatch) {
+		return { kind: "generic", index: Number.parseInt(genericNameMatch[1], 10) };
+	}
+
+	const normalizedKey = sensor.key.toUpperCase();
+	const efficiencyKeyMatch = normalizedKey.match(/^TCE(\d+)$/);
+	if (efficiencyKeyMatch) {
+		return { kind: "efficiency", index: Number.parseInt(efficiencyKeyMatch[1], 10) };
+	}
+
+	const performanceKeyMatch = normalizedKey.match(/^TCP(\d+)$/);
+	if (performanceKeyMatch) {
+		return { kind: "performance", index: Number.parseInt(performanceKeyMatch[1], 10) };
+	}
+
+	const genericKeyMatch = normalizedKey.match(/^TC(\d+)C$/);
+	if (genericKeyMatch) {
+		return { kind: "generic", index: Number.parseInt(genericKeyMatch[1], 10) + 1 };
+	}
+
+	return null;
+}
+
+const CPU_CORE_KIND_ORDER: Record<CpuCoreKind, number> = {
+	efficiency: 0,
+	performance: 1,
+	generic: 2,
+};
+
+function compareCpuCoreDescriptors(
+	left: CpuCoreDescriptor,
+	right: CpuCoreDescriptor,
+): number {
+	const kindDelta = CPU_CORE_KIND_ORDER[left.kind] - CPU_CORE_KIND_ORDER[right.kind];
+	if (kindDelta !== 0) {
+		return kindDelta;
+	}
+
+	return left.index - right.index;
+}
+
+function getCpuSensorsForDisplay(details: Sensor[]): Sensor[] {
+	const averageSensor = details.find(isCpuAverageSensor) ?? buildCpuAverageSensor(details);
+	const displayCpuCores = details
+		.filter((sensor) => sensor.sensor_type === "Cpu")
+		.map((sensor) => ({ sensor, descriptor: toCpuCoreDescriptor(sensor) }))
+		.filter(
+			(
+				entry,
+			): entry is {
+				sensor: Sensor;
+				descriptor: CpuCoreDescriptor;
+			} => entry.descriptor !== null,
+		)
+		.sort((left, right) =>
+			compareCpuCoreDescriptors(left.descriptor, right.descriptor),
+		)
+		.map((entry) => entry.sensor);
+
+	const uniqueByIdentity = new Map(
+		[averageSensor, ...displayCpuCores].map((sensor) => [
+			`${sensor.key}::${sensor.name}`,
+			sensor,
+		]),
+	);
+
+	return [...uniqueByIdentity.values()];
+}
+
 export function getSummarySensorsForDisplay(sensorData: SensorData): Sensor[] {
 	const details = sensorData.details;
 	return [
@@ -189,17 +289,22 @@ export function getDetailSensorsInDisplayOrder(sensorData: SensorData): Sensor[]
 
 export function getAllSensorsForDisplay(sensorData: SensorData): Sensor[] {
 	const completeDetails = ensureComputedRows(sensorData.details);
+	const cpuSensors = getCpuSensorsForDisplay(completeDetails);
 	const byKey = new Map(completeDetails.map((sensor) => [sensor.key, sensor]));
 	const byName = new Map(completeDetails.map((sensor) => [sensor.name, sensor]));
-	const orderedCatalog = TARGET_CATALOG.map(
-		(row) => byKey.get(row.key) ?? byName.get(row.name) ?? toPlaceholderSensor(row),
+	const orderedCatalog = TARGET_CATALOG.flatMap((row) => {
+		if (row.key === "TCPUAVG") {
+			return cpuSensors;
+		}
+		return [byKey.get(row.key) ?? byName.get(row.name) ?? toPlaceholderSensor(row)];
+	});
+	return orderedCatalog.filter(
+		(s) => s.unit !== "W" && (s.source !== "placeholder" || s.sensor_type === "Storage"),
 	);
-	const additionalSensors = completeDetails
-		.filter(
-			(sensor) =>
-				!TARGET_SENSOR_KEYS.has(sensor.key) && !TARGET_SENSOR_NAMES.has(sensor.name),
-		)
-		.sort(compareSensors);
+}
 
-	return [...orderedCatalog, ...additionalSensors];
+export function isPerCoreTemperatureUnavailable(
+	sensorData: SensorData | null,
+): boolean {
+	return sensorData?.diagnostics?.per_core_cpu_temp_available === false;
 }

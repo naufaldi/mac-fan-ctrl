@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::process::Command;
+use std::sync::OnceLock;
 
 use macsmc::{DataValue, Smc};
 use serde::Serialize;
@@ -11,8 +12,6 @@ use crate::apple_silicon_sensors::read_apple_silicon_sensors;
 pub enum SmcError {
     #[error("SMC connection failed: {0}")]
     ConnectionFailed(String),
-    #[error("Failed to read sensor: {0}")]
-    ReadFailed(String),
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -44,6 +43,24 @@ pub enum NullReason {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum FanMode {
+    Auto,
+    Forced,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FanData {
+    pub index: u8,
+    pub label: String,
+    pub actual: f32,
+    pub min: f32,
+    pub max: f32,
+    pub target: f32,
+    pub mode: FanMode,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SummarySensors {
     pub cpu_package: Option<Sensor>,
     pub gpu: Option<Sensor>,
@@ -56,15 +73,20 @@ pub struct SensorData {
     pub summary: SummarySensors,
     pub details: Vec<Sensor>,
     pub diagnostics: SensorDiagnostics,
+    pub fans: Vec<FanData>,
 }
 
 pub struct SmcClient {
     smc: Smc,
+    model_id: Option<String>,
+    perf_level_core_counts: Option<(usize, usize)>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct SensorDiagnostics {
     pub model_id: Option<String>,
+    pub perf_level_core_counts: Option<(usize, usize)>,
+    pub per_core_cpu_temp_available: bool,
     pub diagnostics_enabled: bool,
     pub active_providers: Vec<String>,
     pub unresolved: Vec<UnresolvedSensor>,
@@ -81,6 +103,7 @@ pub struct SensorService {
     smc_client: Option<SmcClient>,
     diagnostics_enabled: bool,
     model_id: Option<String>,
+    perf_level_core_counts: Option<(usize, usize)>,
     use_apple_silicon_provider: bool,
 }
 
@@ -161,19 +184,111 @@ fn to_cpu_average_sensor(values: &[f64]) -> Option<Sensor> {
     ))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CpuTopologySource {
+    PerfLevelSysctl,
+    ModelHint,
+    Heuristic,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CpuTopology {
+    total_cores: usize,
+    efficiency_cores: usize,
+    source: CpuTopologySource,
+}
+
 fn estimated_efficiency_core_count(total_cores: usize) -> usize {
-    if total_cores >= 8 {
-        2
-    } else {
-        0
-    }
+    if total_cores >= 8 { 2 } else { 0 }
 }
 
 fn to_cpu_core_label(index: usize, efficiency_cores: usize) -> String {
+    if efficiency_cores == 0 {
+        return format!("CPU Core {}", index + 1);
+    }
     if index < efficiency_cores {
         format!("CPU Efficiency Core {}", index + 1)
     } else {
         format!("CPU Performance Core {}", index - efficiency_cores + 1)
+    }
+}
+
+fn is_measured_cpu_core_key(key: &str) -> bool {
+    let normalized = key.to_uppercase();
+    normalized.starts_with("TC")
+        && normalized.ends_with('C')
+        && normalized
+            .chars()
+            .skip(2)
+            .take(normalized.len().saturating_sub(3))
+            .all(|character| character.is_ascii_digit())
+}
+
+fn has_measured_per_core_cpu_temperature(details: &[Sensor]) -> bool {
+    details.iter().any(|sensor| {
+        sensor.sensor_type == "Cpu"
+            && sensor.source == SensorSource::Smc
+            && sensor.value.is_some()
+            && is_measured_cpu_core_key(&sensor.key)
+    })
+}
+
+fn model_hint_efficiency_core_count(model_id: Option<&str>, total_cores: usize) -> Option<usize> {
+    model_id.and_then(|model| {
+        let normalized = model.trim();
+        if total_cores == 10 && normalized.starts_with("MacBookPro18,") {
+            return Some(2);
+        }
+        if total_cores == 8 {
+            if normalized.starts_with("MacBookPro18,") {
+                return Some(2);
+            }
+            return Some(4);
+        }
+        None
+    })
+}
+
+fn resolve_cpu_topology(
+    total_cores: usize,
+    model_id: Option<&str>,
+    perf_level_core_counts: Option<(usize, usize)>,
+) -> CpuTopology {
+    if total_cores == 0 {
+        return CpuTopology {
+            total_cores,
+            efficiency_cores: 0,
+            source: CpuTopologySource::Unknown,
+        };
+    }
+
+    if let Some((level0, level1)) = perf_level_core_counts {
+        let lower = level0.min(level1);
+        let upper = level0.max(level1);
+        if lower > 0 && lower + upper == total_cores {
+            return CpuTopology {
+                total_cores,
+                efficiency_cores: lower,
+                source: CpuTopologySource::PerfLevelSysctl,
+            };
+        }
+    }
+
+    if let Some(efficiency_cores) = model_hint_efficiency_core_count(model_id, total_cores) {
+        if efficiency_cores < total_cores {
+            return CpuTopology {
+                total_cores,
+                efficiency_cores,
+                source: CpuTopologySource::ModelHint,
+            };
+        }
+    }
+
+    CpuTopology {
+        total_cores,
+        efficiency_cores: estimated_efficiency_core_count(total_cores),
+        source: CpuTopologySource::Heuristic,
     }
 }
 
@@ -188,7 +303,7 @@ fn has_sensor_named(details: &[Sensor], name: &str) -> bool {
 fn ensure_reference_placeholders(details: Vec<Sensor>) -> Vec<Sensor> {
     let placeholder_specs = [
         ("DISK_SECTION", "Disk Drives:", "C", "Storage"),
-        ("SSD", "APPLE SSD", "C", "Storage"),
+        ("TN0n", "APPLE SSD", "C", "Storage"),
         ("TRKP", "Trackpad", "C", "Trackpad"),
         ("TM0P", "Memory Bank 1", "C", "Memory"),
         ("TM1P", "Memory Bank 2", "C", "Memory"),
@@ -266,13 +381,27 @@ pub(crate) fn build_summary(details: &[Sensor]) -> SummarySensors {
 }
 
 impl SmcClient {
+    #[cfg(test)]
     pub fn new() -> Result<Self, SmcError> {
-        let smc = Smc::connect()
-            .map_err(|e| SmcError::ConnectionFailed(e.to_string()))?;
-        Ok(Self { smc })
+        let model_id = detect_model_id();
+        let perf_level_core_counts = detect_perf_level_core_counts_cached();
+        Self::new_with_context(model_id, perf_level_core_counts)
     }
 
-    fn read_smc_details(&mut self) -> Vec<Sensor> {
+    pub fn new_with_context(
+        model_id: Option<String>,
+        perf_level_core_counts: Option<(usize, usize)>,
+    ) -> Result<Self, SmcError> {
+        let smc = Smc::connect()
+            .map_err(|e| SmcError::ConnectionFailed(e.to_string()))?;
+        Ok(Self {
+            smc,
+            model_id,
+            perf_level_core_counts,
+        })
+    }
+
+    fn read_smc_details(&mut self) -> (Vec<Sensor>, Vec<FanData>) {
         let baseline = [
             self.read_cpu_temperature_sensors(),
             self.read_cpu_core_sensors(),
@@ -285,16 +414,65 @@ impl SmcClient {
         .flatten()
         .collect::<Vec<_>>();
 
-        let dynamic = self.read_dynamic_temperature_sensors();
+        let dynamic = self.read_dynamic_temperature_keys();
+        let fans = self.read_fans();
         let derived = derive_apple_silicon_catalog_rows(&dynamic);
 
-        [baseline, dynamic, derived]
+        let sensors = [baseline, dynamic, derived]
             .into_iter()
             .flatten()
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+
+        (sensors, fans)
     }
 
-    fn read_dynamic_temperature_sensors(&mut self) -> Vec<Sensor> {
+    /// Read fan data using the dedicated `smc.fans()` API (fast: ~5 key reads per fan).
+    fn read_fans(&mut self) -> Vec<FanData> {
+        let fan_iter = match self.smc.fans() {
+            Ok(iter) => iter,
+            Err(error) => {
+                eprintln!("[mac-fan-ctrl] Failed reading fans: {error}");
+                return Vec::new();
+            }
+        };
+
+        fan_iter
+            .enumerate()
+            .filter_map(|(position, result)| {
+                let fan_speed = match result {
+                    Ok(speed) => speed,
+                    Err(error) => {
+                        eprintln!("[mac-fan-ctrl] Failed reading fan {position}: {error}");
+                        return None;
+                    }
+                };
+
+                let label = match position {
+                    0 => "Left Fan".to_string(),
+                    1 => "Right Fan".to_string(),
+                    _ => format!("Fan {}", position + 1),
+                };
+
+                let mode = match fan_speed.mode {
+                    macsmc::FanMode::Forced => FanMode::Forced,
+                    macsmc::FanMode::Auto => FanMode::Auto,
+                };
+
+                Some(FanData {
+                    index: position as u8,
+                    label,
+                    actual: *fan_speed.actual,
+                    min: *fan_speed.min,
+                    max: *fan_speed.max,
+                    target: *fan_speed.target,
+                    mode,
+                })
+            })
+            .collect()
+    }
+
+    /// Read dynamic temperature keys from SMC (slow: iterates all keys).
+    fn read_dynamic_temperature_keys(&mut self) -> Vec<Sensor> {
         let all_data = match self.smc.all_data() {
             Ok(data) => data,
             Err(error) => {
@@ -305,18 +483,15 @@ impl SmcClient {
 
         all_data
             .filter_map(Result::ok)
+            .filter(|entry| entry.key.starts_with('T'))
             .filter_map(|entry| {
                 let value = entry.value.ok().flatten().and_then(data_value_to_f64)?;
                 if !(1.0..=130.0).contains(&value) {
                     return None;
                 }
-                let key = entry.key;
-                if !key.starts_with('T') {
-                    return None;
-                }
-                let (name, sensor_type) = classify_dynamic_temperature_key(&key);
+                let (name, sensor_type) = classify_dynamic_temperature_key(&entry.key);
                 Some(create_sensor(
-                    &key,
+                    &entry.key,
                     &name,
                     Some(value),
                     "C",
@@ -325,7 +500,7 @@ impl SmcClient {
                     None,
                 ))
             })
-            .collect::<Vec<_>>()
+            .collect()
     }
 
     fn read_cpu_temperature_sensors(&mut self) -> Vec<Sensor> {
@@ -355,7 +530,11 @@ impl SmcClient {
                     .filter(|(_, value)| *value > 0.0)
                     .collect::<Vec<_>>();
 
-                let efficiency_cores = estimated_efficiency_core_count(values.len());
+                let topology = resolve_cpu_topology(
+                    values.len(),
+                    self.model_id.as_deref(),
+                    self.perf_level_core_counts,
+                );
                 let core_values = values
                     .iter()
                     .map(|(_, value)| *value as f64)
@@ -366,7 +545,7 @@ impl SmcClient {
                     .chain(values.into_iter().map(|(index, value)| {
                         create_sensor(
                             &format!("TC{}C", index),
-                            &to_cpu_core_label(index, efficiency_cores),
+                            &to_cpu_core_label(index, topology.efficiency_cores),
                             Some(value as f64),
                             "C",
                             "Cpu",
@@ -522,6 +701,7 @@ impl SmcClient {
             .flatten()
             .collect::<Vec<_>>()
     }
+
 }
 
 fn data_value_to_f64(value: DataValue) -> Option<f64> {
@@ -584,31 +764,6 @@ fn derive_apple_silicon_catalog_rows(dynamic: &[Sensor]) -> Vec<Sensor> {
         )
     });
 
-    let cpu_cores = [
-        ("TCE1", "CPU Efficiency Core 1"),
-        ("TCE2", "CPU Efficiency Core 2"),
-        ("TCP1", "CPU Performance Core 1"),
-        ("TCP2", "CPU Performance Core 2"),
-        ("TCP3", "CPU Performance Core 3"),
-        ("TCP4", "CPU Performance Core 4"),
-        ("TCP5", "CPU Performance Core 5"),
-        ("TCP6", "CPU Performance Core 6"),
-    ]
-    .into_iter()
-    .zip(cpu_die.into_iter())
-    .map(|((key, name), (_, value))| {
-        create_sensor(
-            key,
-            name,
-            Some(value),
-            "C",
-            "Cpu",
-            SensorSource::Derived,
-            None,
-        )
-    })
-    .collect::<Vec<_>>();
-
     let gpu_rows = [
         ("TG0D", "GPU Cluster 1"),
         ("TG0P", "GPU Cluster 2"),
@@ -645,10 +800,7 @@ fn derive_apple_silicon_catalog_rows(dynamic: &[Sensor]) -> Vec<Sensor> {
     })
     .collect::<Vec<_>>();
 
-    let power_die = cpu_cores
-        .iter()
-        .filter_map(|sensor| sensor.value)
-        .collect::<Vec<_>>();
+    let power_die = cpu_die.iter().map(|(_, value)| *value).collect::<Vec<_>>();
     let power_row = (!power_die.is_empty()).then(|| {
         create_sensor(
             "TPCD",
@@ -663,7 +815,6 @@ fn derive_apple_silicon_catalog_rows(dynamic: &[Sensor]) -> Vec<Sensor> {
 
     cpu_average
         .into_iter()
-        .chain(cpu_cores)
         .chain(gpu_rows)
         .chain(power_row)
         .collect::<Vec<_>>()
@@ -677,6 +828,32 @@ fn detect_model_id() -> Option<String> {
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn read_sysctl_usize(key: &str) -> Option<usize> {
+    Command::new("sysctl")
+        .args(["-n", key])
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| value.trim().to_string())
+        .and_then(|value| value.parse::<usize>().ok())
+}
+
+fn detect_perf_level_core_counts() -> Option<(usize, usize)> {
+    let level0 = read_sysctl_usize("hw.perflevel0.physicalcpu");
+    let level1 = read_sysctl_usize("hw.perflevel1.physicalcpu");
+    match (level0, level1) {
+        (Some(first), Some(second)) if first > 0 || second > 0 => Some((first, second)),
+        _ => None,
+    }
+}
+
+fn detect_perf_level_core_counts_cached() -> Option<(usize, usize)> {
+    static PERF_LEVEL_CORE_COUNTS: OnceLock<Option<(usize, usize)>> = OnceLock::new();
+    PERF_LEVEL_CORE_COUNTS
+        .get_or_init(detect_perf_level_core_counts)
+        .to_owned()
 }
 
 fn diagnostics_enabled() -> bool {
@@ -715,17 +892,28 @@ fn merge_sensor_sets(primary: Vec<Sensor>, fallback: Vec<Sensor>) -> Vec<Sensor>
 
 impl SensorService {
     pub fn new() -> Self {
+        let model_id = detect_model_id();
+        let perf_level_core_counts = detect_perf_level_core_counts_cached();
         Self {
-            smc_client: SmcClient::new().ok(),
+            smc_client: SmcClient::new_with_context(
+                model_id.clone(),
+                perf_level_core_counts,
+            )
+            .ok(),
             diagnostics_enabled: diagnostics_enabled(),
-            model_id: detect_model_id(),
+            model_id,
+            perf_level_core_counts,
             use_apple_silicon_provider: should_use_apple_silicon_provider(),
         }
     }
 
-    fn read_smc_details(&mut self) -> Vec<Sensor> {
+    fn read_smc_details(&mut self) -> (Vec<Sensor>, Vec<FanData>) {
         if self.smc_client.is_none() {
-            self.smc_client = SmcClient::new().ok();
+            self.smc_client = SmcClient::new_with_context(
+                self.model_id.clone(),
+                self.perf_level_core_counts,
+            )
+            .ok();
         }
 
         self.smc_client
@@ -734,9 +922,25 @@ impl SensorService {
             .unwrap_or_default()
     }
 
+    /// Fast path: read only fan data without the slow all_data() scan.
+    pub fn read_fans_only(&mut self) -> Vec<FanData> {
+        if self.smc_client.is_none() {
+            self.smc_client = SmcClient::new_with_context(
+                self.model_id.clone(),
+                self.perf_level_core_counts,
+            )
+            .ok();
+        }
+
+        self.smc_client
+            .as_mut()
+            .map(SmcClient::read_fans)
+            .unwrap_or_default()
+    }
+
     pub fn read_all_sensors(&mut self) -> Result<SensorData, SmcError> {
         let mut providers = vec!["smc".to_string()];
-        let smc_details = self.read_smc_details();
+        let (smc_details, fans) = self.read_smc_details();
 
         let (details, unresolved) = if self.use_apple_silicon_provider {
             let snapshot = read_apple_silicon_sensors();
@@ -750,9 +954,12 @@ impl SensorService {
         };
 
         let details = sort_sensors_for_display(ensure_reference_placeholders(details));
+        let per_core_cpu_temp_available = has_measured_per_core_cpu_temperature(&details);
         let summary = build_summary(&details);
         let diagnostics = SensorDiagnostics {
             model_id: self.model_id.clone(),
+            perf_level_core_counts: self.perf_level_core_counts,
+            per_core_cpu_temp_available,
             diagnostics_enabled: self.diagnostics_enabled,
             active_providers: providers,
             unresolved,
@@ -769,6 +976,7 @@ impl SensorService {
             summary,
             details,
             diagnostics,
+            fans,
         })
     }
 }
@@ -776,8 +984,9 @@ impl SensorService {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_summary, derive_apple_silicon_catalog_rows, sort_sensors_for_display, NullReason,
-        Sensor, SensorSource, SmcClient, SummarySensors,
+        build_summary, derive_apple_silicon_catalog_rows,
+        has_measured_per_core_cpu_temperature, resolve_cpu_topology, sort_sensors_for_display,
+        CpuTopologySource, NullReason, Sensor, SensorSource, SmcClient, SummarySensors,
     };
 
     fn sample_sensor(
@@ -813,6 +1022,42 @@ mod tests {
         assert_eq!(summary.gpu.map(|sensor| sensor.key), Some("TGAVG".to_string()));
         assert_eq!(summary.ram.map(|sensor| sensor.key), Some("TM0P".to_string()));
         assert_eq!(summary.ssd.map(|sensor| sensor.name), Some("APPLE SSD".to_string()));
+    }
+
+    #[test]
+    fn detects_measured_per_core_cpu_temperature_from_smc_core_keys() {
+        let details = vec![
+            sample_sensor("TCPUAVG", "CPU Core Average", Some(62.0), "C", "Cpu"),
+            sample_sensor("TC0C", "CPU Performance Core 1", Some(64.0), "C", "Cpu"),
+        ];
+
+        assert!(has_measured_per_core_cpu_temperature(&details));
+    }
+
+    #[test]
+    fn does_not_treat_non_core_cpu_rows_as_measured_per_core_temperatures() {
+        let details = vec![
+            Sensor {
+                key: "TCPUAVG".to_string(),
+                name: "CPU Core Average".to_string(),
+                value: Some(62.0),
+                unit: "C".to_string(),
+                sensor_type: "Cpu".to_string(),
+                source: SensorSource::Derived,
+                null_reason: None,
+            },
+            Sensor {
+                key: "TPCD".to_string(),
+                name: "Power Manager Die Average".to_string(),
+                value: Some(58.0),
+                unit: "C".to_string(),
+                sensor_type: "Power".to_string(),
+                source: SensorSource::Derived,
+                null_reason: None,
+            },
+        ];
+
+        assert!(!has_measured_per_core_cpu_temperature(&details));
     }
 
     #[test]
@@ -859,7 +1104,7 @@ mod tests {
     }
 
     #[test]
-    fn derives_cpu_rows_from_pmu_die_candidates() {
+    fn derives_cpu_average_without_core_rows_from_pmu_die_candidates() {
         let dynamic = vec![
             sample_sensor("TP0b", "PMU tdie0", Some(57.0), "C", "Cpu"),
             sample_sensor("TP1b", "PMU tdie1", Some(58.0), "C", "Cpu"),
@@ -880,19 +1125,49 @@ mod tests {
                 .and_then(|sensor| sensor.value),
             Some(63.5),
         );
-        assert_eq!(
+        assert!(
             derived
                 .iter()
-                .find(|sensor| sensor.key == "TCE1")
-                .and_then(|sensor| sensor.value),
-            Some(57.0),
+                .all(|sensor| {
+                    !sensor.key.starts_with("TCE")
+                        && !(sensor.key.starts_with("TCP")
+                            && sensor.key[3..].chars().all(|char| char.is_ascii_digit()))
+                })
         );
+    }
+
+    #[test]
+    fn does_not_derive_dynamic_cpu_core_rows_when_tp_values_spike() {
+        let dynamic = vec![
+            sample_sensor("TP0b", "PMU tdie0", Some(50.0), "C", "Cpu"),
+            sample_sensor("TP1b", "PMU tdie1", Some(51.0), "C", "Cpu"),
+            sample_sensor("TP2b", "PMU tdie2", Some(52.0), "C", "Cpu"),
+            sample_sensor("TP3b", "PMU tdie3", Some(53.0), "C", "Cpu"),
+            sample_sensor("TP4b", "PMU tdie4", Some(54.0), "C", "Cpu"),
+            sample_sensor("TP5b", "PMU tdie5", Some(55.0), "C", "Cpu"),
+            sample_sensor("TP6b", "PMU tdie6", Some(56.0), "C", "Cpu"),
+            sample_sensor("TP7b", "PMU tdie7", Some(57.0), "C", "Cpu"),
+            sample_sensor("TP8b", "PMU tdie8", Some(58.0), "C", "Cpu"),
+            sample_sensor("TP9b", "PMU tdie9", Some(59.0), "C", "Cpu"),
+        ];
+
+        let derived = derive_apple_silicon_catalog_rows(&dynamic);
+        let cpu_cores = derived
+            .iter()
+            .filter(|sensor| {
+                sensor.key.starts_with("TCE")
+                    || (sensor.key.starts_with("TCP")
+                        && sensor.key[3..].chars().all(|char| char.is_ascii_digit()))
+            })
+            .collect::<Vec<_>>();
+
+        assert!(cpu_cores.is_empty());
         assert_eq!(
             derived
                 .iter()
-                .find(|sensor| sensor.key == "TCP1")
+                .find(|sensor| sensor.key == "TCPUAVG")
                 .and_then(|sensor| sensor.value),
-            Some(63.0),
+            Some(54.5),
         );
     }
 
@@ -953,7 +1228,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(core_keys.len(), 8);
+        assert_eq!(core_keys.len(), 0);
         assert_eq!(
             derived
                 .iter()
@@ -971,10 +1246,24 @@ mod tests {
     }
 
     #[test]
+    fn resolves_cpu_topology_from_perf_level_counts() {
+        let topology = resolve_cpu_topology(8, None, Some((4, 4)));
+        assert_eq!(topology.efficiency_cores, 4);
+        assert_eq!(topology.source, CpuTopologySource::PerfLevelSysctl);
+    }
+
+    #[test]
+    fn resolves_cpu_topology_from_model_hint_when_perf_levels_missing() {
+        let topology = resolve_cpu_topology(10, Some("MacBookPro18,3"), None);
+        assert_eq!(topology.efficiency_cores, 2);
+        assert_eq!(topology.source, CpuTopologySource::ModelHint);
+    }
+
+    #[test]
     #[ignore = "hardware-dependent smoke test for local Apple Silicon validation"]
     fn reads_dynamic_apple_silicon_values() {
         let mut client = SmcClient::new().expect("SMC client should connect on supported Macs");
-        let details = client.read_smc_details();
+        let (details, _fans) = client.read_smc_details();
         let has_cpu_average = details
             .iter()
             .any(|sensor| sensor.key == "TCPUAVG" && sensor.value.is_some());

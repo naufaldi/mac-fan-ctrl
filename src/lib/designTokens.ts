@@ -51,6 +51,7 @@ export type FanControlMode = 'auto' | 'constant';
 /** Sensor data interface for components */
 export interface SensorData {
   id: string;
+  fanIndex?: number;
   label: string;
   value: number | null;
   unit: 'celsius' | 'rpm';

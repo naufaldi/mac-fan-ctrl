@@ -222,6 +222,50 @@ For contributors learning the stack:
 | `docs/learning/system-programming.md` | macOS IOKit |
 | `docs/learning/dev-setup.md` | Environment setup |
 
+## macOS Hardware APIs for Temperature & Sensor Data
+
+When reading or extending sensor support, use the following APIs in priority order:
+
+### 1. AppleSMC (already integrated)
+- **What**: Apple's System Management Controller — the primary source for temperature, fan, and power sensors
+- **How**: Via `macsmc` crate (IOKit FFI → `AppleSMC` kernel service)
+- **Keys**: T* = temperature, F* = fans, P* = power
+- **File**: `src-tauri/src/smc.rs`, `macsmc` crate
+- **Limitation**: M1/M2/M3 expose fewer keys than Intel; some sensors (e.g. airflow TaLC/TaRC) have no physical hardware on Apple Silicon
+
+### 2. IOHIDEventService / IOKit (already integrated)
+- **What**: IOKit's HID event layer — used for sensors that Apple Silicon reports through the HID stack rather than SMC
+- **How**: `ioreg -r -c IOHIDEventService -l` parsed in `src-tauri/src/apple_silicon_sensors.rs`
+- **Gives**: Battery temps, GPU cluster, PMU die (fills gaps where SMC keys return 0 on M-series)
+- **SensorSource**: `"iohid_iokit"`
+- **hidutil**: `hidutil list` can enumerate HID services; useful for discovery
+
+### 3. IOReport (private Apple framework — not yet integrated)
+- **What**: Private IOKit sub-framework used internally by `powermetrics` and Activity Monitor
+- **Gives on Apple Silicon**: Per-cluster CPU temps (E-core vs P-core), ANE (Neural Engine) temp, thermal pressure level, die-level granularity
+- **How to access**: Requires reverse-engineered FFI bindings (`IOReport.h` is private). Projects like `vladkens/macmon` expose this via open-source Rust
+- **Entitlement needed**: `com.apple.private.iokit.ioreporter` (sandboxed apps need this)
+- **Reference**: https://github.com/vladkens/macmon
+
+### 4. powermetrics CLI (system tool — not yet integrated)
+- **What**: Apple's own thermal/power sampling tool, ships with macOS
+- **Gives**: Thermal throttle reason, cluster temps, power draw, package temps
+- **How**: `sudo powermetrics --samplers thermal,cpu_power -n 1 -f json`
+- **Limitation**: Requires `sudo` — cannot run from a sandboxed Tauri app without special entitlements
+- **Use case**: Throttle state detection, not continuous polling
+
+### 5. sysctl (already used for topology, not temps)
+- **What**: BSD kernel sysctl interface
+- **Currently used for**: `hw.model`, `hw.perflevel0.physicalcpu`, `hw.perflevel1.physicalcpu` (CPU core counts)
+- **Not useful for temps**: macOS does not expose temperature data through sysctl
+
+### Sensor Source Priority
+When a sensor key is available from multiple sources, prefer in this order:
+1. `smc` — most authoritative for T* keys
+2. `iohid_iokit` — fallback for Apple Silicon where SMC returns 0
+3. `derived` — computed from other sensors (averages, sums)
+4. `placeholder` — catalog entry with no hardware data (hidden from UI)
+
 ## Safety Considerations
 
 When implementing Phase B (fan control):

@@ -38,6 +38,7 @@ const sampleSensors: SensorData = {
 			sensor_type: "Cpu",
 		},
 	],
+	fans: [],
 };
 
 describe("tauriCommands", () => {

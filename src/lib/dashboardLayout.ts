@@ -8,6 +8,7 @@ export type SensorPartitions = {
 
 export type FanRowData = {
   id: string;
+  fanIndex: number;
   label: string;
   minRpm: number;
   currentRpm: number | null;
@@ -35,6 +36,7 @@ export const toFanRowData = (fan: SensorData): FanRowData => {
 
   return {
     id: fan.id,
+    fanIndex: fan.fanIndex ?? 0,
     label: fan.label,
     minRpm: fan.minRpm ?? bounds.minRpm,
     currentRpm,
