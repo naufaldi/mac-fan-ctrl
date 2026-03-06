@@ -70,7 +70,14 @@ pub fn set_fan_constant_rpm(
     let mut service = SensorService::new();
     let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
 
-    eprintln!("[cmd] fan data: {:?}", sensor_data.fans.iter().map(|f| format!("fan{}:min={} max={}", f.index, f.min, f.max)).collect::<Vec<_>>());
+    eprintln!(
+        "[cmd] fan data: {:?}",
+        sensor_data
+            .fans
+            .iter()
+            .map(|f| format!("fan{}:min={} max={}", f.index, f.min, f.max))
+            .collect::<Vec<_>>()
+    );
 
     let config = FanControlConfig::ConstantRpm { target_rpm: rpm };
     let result = state
@@ -147,11 +154,7 @@ pub fn get_presets(state: State<'_, AppState>) -> Result<Vec<Preset>, String> {
     let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
 
     let fan_indices: Vec<u8> = sensor_data.fans.iter().map(|f| f.index).collect();
-    let fan_maxes: HashMap<u8, f32> = sensor_data
-        .fans
-        .iter()
-        .map(|f| (f.index, f.max))
-        .collect();
+    let fan_maxes: HashMap<u8, f32> = sensor_data.fans.iter().map(|f| (f.index, f.max)).collect();
 
     Ok(presets::all_presets(&store, &fan_indices, &fan_maxes))
 }
@@ -173,11 +176,7 @@ pub fn apply_preset(state: State<'_, AppState>, name: String) -> Result<(), Stri
     let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
 
     let fan_indices: Vec<u8> = sensor_data.fans.iter().map(|f| f.index).collect();
-    let fan_maxes: HashMap<u8, f32> = sensor_data
-        .fans
-        .iter()
-        .map(|f| (f.index, f.max))
-        .collect();
+    let fan_maxes: HashMap<u8, f32> = sensor_data.fans.iter().map(|f| (f.index, f.max)).collect();
 
     let mut store = state.preset_store.lock().map_err(|e| e.to_string())?;
     let all = presets::all_presets(&store, &fan_indices, &fan_maxes);
@@ -206,10 +205,7 @@ pub fn apply_preset(state: State<'_, AppState>, name: String) -> Result<(), Stri
 }
 
 #[tauri::command]
-pub fn save_preset(
-    state: State<'_, AppState>,
-    name: String,
-) -> Result<(), String> {
+pub fn save_preset(state: State<'_, AppState>, name: String) -> Result<(), String> {
     let fan_control = state.fan_control.lock().map_err(|e| e.to_string())?;
     let configs = fan_control.configs().clone();
 
@@ -231,6 +227,72 @@ pub fn delete_preset(state: State<'_, AppState>, name: String) -> Result<(), Str
     presets::delete_custom_preset(&mut store, &name)
 }
 
+// ── Diagnostic commands ──────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn diagnose_fan_control(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    eprintln!("[cmd] diagnose_fan_control called");
+
+    // System info
+    let mut lines: Vec<String> = Vec::new();
+
+    // Check if running as root
+    let uid = unsafe { libc::getuid() };
+    let euid = unsafe { libc::geteuid() };
+    lines.push(format!("Process UID: {uid} EUID: {euid} (0 = root)"));
+    lines.push(format!("Running as root: {}", euid == 0));
+
+    // macOS version
+    if let Ok(output) = std::process::Command::new("sw_vers").output() {
+        let sw_vers = String::from_utf8_lossy(&output.stdout);
+        for line in sw_vers.lines() {
+            lines.push(format!("  {line}"));
+        }
+    }
+
+    // Hardware model
+    if let Ok(output) = std::process::Command::new("sysctl")
+        .arg("-n")
+        .arg("hw.model")
+        .output()
+    {
+        let model = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        lines.push(format!("Hardware model: {model}"));
+    }
+
+    // Chip info
+    if let Ok(output) = std::process::Command::new("sysctl")
+        .arg("-n")
+        .arg("machdep.cpu.brand_string")
+        .output()
+    {
+        let chip = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        lines.push(format!("CPU: {chip}"));
+    }
+
+    // SMC writer status
+    let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
+    match writer_guard.as_ref() {
+        Some(writer) => {
+            lines.push("SMC Writer: AVAILABLE".to_string());
+            let diag = writer.diagnose_fan_control();
+            lines.extend(diag);
+        }
+        None => {
+            lines.push("SMC Writer: NOT AVAILABLE (init failed — likely not running as root)".to_string());
+        }
+    }
+
+    // Print to stderr too for terminal visibility
+    eprintln!("\n========================================");
+    for line in &lines {
+        eprintln!("[diag] {line}");
+    }
+    eprintln!("========================================\n");
+
+    Ok(lines)
+}
+
 // ── Privilege commands ───────────────────────────────────────────────────────
 
 #[derive(Serialize, Clone)]
@@ -248,7 +310,8 @@ pub fn get_privilege_status(state: State<'_, AppState>) -> Result<PrivilegeStatu
 
 #[tauri::command]
 pub fn request_privilege_restart(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get executable path: {e}"))?;
+    let exe_path =
+        std::env::current_exe().map_err(|e| format!("Failed to get executable path: {e}"))?;
 
     // Look for the .app bundle by traversing up from the binary
     // Binary is at: MyApp.app/Contents/MacOS/my-app
@@ -269,14 +332,12 @@ pub fn request_privilege_restart(app_handle: tauri::AppHandle) -> Result<(), Str
     // Production: run the inner binary directly as root.
     // NOTE: `open -n` does NOT propagate root privileges (Launch Services
     // always launches as the GUI user), so we must exec the binary directly.
-    let inner_binary = app_bundle.join("Contents/MacOS").join(
-        exe_path.file_name().unwrap_or_default()
-    );
+    let inner_binary = app_bundle
+        .join("Contents/MacOS")
+        .join(exe_path.file_name().unwrap_or_default());
     let shell_cmd = format!("'{}' &>/dev/null &", inner_binary.to_string_lossy());
 
-    let script = format!(
-        "do shell script \"{shell_cmd}\" with administrator privileges"
-    );
+    let script = format!("do shell script \"{shell_cmd}\" with administrator privileges");
 
     let result = std::process::Command::new("osascript")
         .arg("-e")

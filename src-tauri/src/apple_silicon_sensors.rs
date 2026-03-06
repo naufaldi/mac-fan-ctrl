@@ -17,11 +17,7 @@ fn parse_ioreg_dump(args: &[&str]) -> Option<String> {
 }
 
 fn parse_number(value: &str) -> Option<f64> {
-    value
-        .trim()
-        .trim_matches('"')
-        .parse::<f64>()
-        .ok()
+    value.trim().trim_matches('"').parse::<f64>().ok()
 }
 
 fn to_celsius(raw: f64) -> f64 {
@@ -158,5 +154,8 @@ pub fn read_apple_silicon_sensors() -> AppleSiliconSnapshot {
         sensors.push(sensor);
     }
 
-    AppleSiliconSnapshot { sensors, unresolved }
+    AppleSiliconSnapshot {
+        sensors,
+        unresolved,
+    }
 }

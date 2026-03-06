@@ -1682,6 +1682,7 @@ name = "mac-fan-ctrl"
 version = "0.1.0"
 dependencies = [
  "dirs 5.0.1",
+ "libc",
  "macsmc",
  "serde",
  "serde_json",

@@ -17,8 +17,9 @@ Welcome to the learning resources for mac-fan-ctrl. This project is designed as 
 ### Phase 3: System Programming
 7. [macOS SMC](./macos-smc.md) - System Management Controller basics
 8. [Read Sensor Architecture](./read-sensor.md) - End-to-end sensor read flow and N/A behavior
-9. [System Programming Concepts](./system-programming.md) - Low-level macOS programming
-10. [Unsafe Rust](./unsafe-rust.md) - When and how to use unsafe code
+9. [M1 Pro Fan Control Investigation](./fan-control-m1-pro-investigation.md) - Real-world Apple Silicon write-vs-hardware mismatch analysis
+10. [System Programming Concepts](./system-programming.md) - Low-level macOS programming
+11. [Unsafe Rust](./unsafe-rust.md) - When and how to use unsafe code
 
 ### Phase 4: Integration
 11. [Tauri Commands](./tauri-commands.md) - Frontend-Backend communication

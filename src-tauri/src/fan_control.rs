@@ -71,16 +71,15 @@ impl FanControlState {
 
     /// Removes a fan's config (returns it to Auto) and applies.
     /// Re-locks thermal control if no fans remain in a forced mode.
-    pub fn set_auto(
-        &mut self,
-        fan_index: u8,
-        writer: &SmcWriter,
-    ) -> Result<(), SmcWriteError> {
+    pub fn set_auto(&mut self, fan_index: u8, writer: &SmcWriter) -> Result<(), SmcWriteError> {
         writer.set_fan_auto(fan_index)?;
         self.configs.insert(fan_index, FanControlConfig::Auto);
 
         // Re-lock thermal enforcement if all fans are now auto
-        let any_forced = self.configs.values().any(|c| !matches!(c, FanControlConfig::Auto));
+        let any_forced = self
+            .configs
+            .values()
+            .any(|c| !matches!(c, FanControlConfig::Auto));
         if !any_forced {
             let _ = writer.lock_fan_control();
         }
@@ -141,19 +140,9 @@ impl FanControlState {
                 if let Some(temp) = current_temp {
                     let fan = fans.iter().find(|f| f.index == *fan_index);
                     if let Some(fan) = fan {
-                        let target_rpm = interpolate_rpm(
-                            temp as f32,
-                            *temp_low,
-                            *temp_high,
-                            fan.min,
-                            fan.max,
-                        );
-                        let _ = writer.set_fan_target_rpm(
-                            *fan_index,
-                            target_rpm,
-                            fan.min,
-                            fan.max,
-                        );
+                        let target_rpm =
+                            interpolate_rpm(temp as f32, *temp_low, *temp_high, fan.min, fan.max);
+                        let _ = writer.set_fan_target_rpm(*fan_index, target_rpm, fan.min, fan.max);
                     }
                 }
             }
@@ -193,9 +182,7 @@ impl FanControlState {
     pub fn restore_all_auto(&mut self, writer: &SmcWriter) {
         for (fan_index, _) in &self.configs {
             if let Err(error) = writer.set_fan_auto(*fan_index) {
-                eprintln!(
-                    "[mac-fan-ctrl] Failed to restore fan {fan_index} to auto: {error}"
-                );
+                eprintln!("[mac-fan-ctrl] Failed to restore fan {fan_index} to auto: {error}");
             }
         }
         self.configs.clear();
@@ -257,10 +244,7 @@ fn apply_config(
 }
 
 /// Forces all fans to their maximum RPM (emergency mode).
-fn force_all_fans_max(
-    fans: &[FanData],
-    writer: &SmcWriter,
-) -> Result<(), SmcWriteError> {
+fn force_all_fans_max(fans: &[FanData], writer: &SmcWriter) -> Result<(), SmcWriteError> {
     for fan in fans {
         writer.set_fan_target_rpm(fan.index, fan.max, fan.min, fan.max)?;
     }
