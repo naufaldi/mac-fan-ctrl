@@ -27,17 +27,22 @@
   // ── Modal state ──────────────────────────────────────────────────────────
 
   let modalFan: FanData | null = $state(null);
+  let modalTriggerEl: HTMLButtonElement | null = $state(null);
   let privilegeError: string | null = $state(null);
 
-  function openCustomModal(fanIndex: number): void {
+  function openCustomModal(fanIndex: number, triggerEl: HTMLButtonElement): void {
     const fan = rawFans.find((f) => f.index === fanIndex);
     if (fan) {
       modalFan = fan;
+      modalTriggerEl = triggerEl;
     }
   }
 
   function closeModal(): void {
+    const trigger = modalTriggerEl;
     modalFan = null;
+    modalTriggerEl = null;
+    queueMicrotask(() => trigger?.focus());
   }
 
   function isPrivilegeError(error: unknown): boolean {
@@ -149,7 +154,7 @@
                 fan.controlMode === 'constant' ? controlActiveClass : controlInactiveClass
               )}
               aria-label={`Set ${fan.label} to custom mode`}
-              onclick={() => openCustomModal(fan.fanIndex)}
+              onclick={(e: MouseEvent) => openCustomModal(fan.fanIndex, e.currentTarget as HTMLButtonElement)}
             >
               {fan.controlMode === 'constant' ? `Constant value of ${fan.targetRpm}` : 'Custom...'}
             </button>

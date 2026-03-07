@@ -1,7 +1,9 @@
 <script lang="ts">
 import { untrack } from "svelte";
+import { fade, scale } from "svelte/transition";
 import { cn } from "$lib/cn";
-import { setFanConstantRpm, setFanSensorControl, requestPrivilegeRestart } from "$lib/tauriCommands";
+import { getFanControlSensors } from "$lib/sensorListPaneState";
+import { requestPrivilegeRestart, setFanConstantRpm, setFanSensorControl } from "$lib/tauriCommands";
 import type { FanData, Sensor } from "$lib/types";
 
 interface Props {
@@ -12,10 +14,8 @@ interface Props {
 
 const { fan, sensors, onclose }: Props = $props();
 
-// Filter to temperature sensors only for the dropdown
-const tempSensors = $derived(
-	sensors.filter((s) => s.unit === "C" && s.value !== null),
-);
+// Filter to sensors relevant for fan control decisions
+const tempSensors = $derived(getFanControlSensors(sensors));
 
 // ── Modal state ──────────────────────────────────────────────────────────
 
@@ -23,15 +23,43 @@ type ControlMode = "constant_rpm" | "sensor_based";
 
 let selectedMode: ControlMode = $state("constant_rpm");
 let constantRpm: number = $state(untrack(() => Math.round(fan.min + (fan.max - fan.min) / 2)));
-let selectedSensorKey: string = $state(untrack(() => sensors.filter((s) => s.unit === "C" && s.value !== null)[0]?.key ?? ""));
-let tempLow: number = $state(33);
-let tempHigh: number = $state(85);
+let selectedSensorKey: string = $state(untrack(() => getFanControlSensors(sensors)[0]?.key ?? ""));
+let tempLow: number = $state(40);
+let tempHigh: number = $state(90);
 let isSubmitting: boolean = $state(false);
 let errorMessage: string = $state("");
+
+// ── Element refs ─────────────────────────────────────────────────────────
+
+let dialogEl: HTMLDivElement | undefined = $state(undefined);
+let okButtonEl: HTMLButtonElement | undefined = $state(undefined);
+
+// Auto-focus OK button on mount
+$effect(() => {
+	okButtonEl?.focus();
+});
 
 // Clamp RPM to valid range
 const clampedRpm = $derived(
 	Math.max(fan.min, Math.min(fan.max, Math.round(constantRpm))),
+);
+
+// ── Temperature range bar state ──────────────────────────────────────────
+
+const selectedSensorValue = $derived(
+	tempSensors.find((s) => s.key === selectedSensorKey)?.value ?? null,
+);
+
+const tempPosition = $derived(
+	selectedSensorValue !== null && tempHigh > tempLow
+		? Math.max(0, Math.min(1, (selectedSensorValue - tempLow) / (tempHigh - tempLow)))
+		: null,
+);
+
+const rangeBarAriaLabel = $derived(
+	selectedSensorValue !== null
+		? `Fan speed range: minimum at ${tempLow}°C, maximum at ${tempHigh}°C. Current sensor temperature is ${selectedSensorValue}°C.`
+		: `Fan speed range: minimum at ${tempLow}°C, maximum at ${tempHigh}°C.`,
 );
 
 // ── Handlers ─────────────────────────────────────────────────────────────
@@ -82,22 +110,33 @@ function handleCancel(): void {
 	onclose();
 }
 
-function handleBackdropClick(event: MouseEvent): void {
-	if (event.target === event.currentTarget) {
-		onclose();
-	}
-}
-
 function handleKeydown(event: KeyboardEvent): void {
 	if (event.key === "Escape") {
 		onclose();
+		return;
+	}
+	if (event.key === "Tab" && dialogEl) {
+		const focusableSelector =
+			'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+		const focusableElements = Array.from(
+			dialogEl.querySelectorAll<HTMLElement>(focusableSelector),
+		);
+		const firstFocusable = focusableElements.at(0);
+		const lastFocusable = focusableElements.at(-1);
+		if (event.shiftKey && document.activeElement === firstFocusable) {
+			event.preventDefault();
+			lastFocusable?.focus();
+		} else if (!event.shiftKey && document.activeElement === lastFocusable) {
+			event.preventDefault();
+			firstFocusable?.focus();
+		}
 	}
 }
 
 // ── Shared styles ────────────────────────────────────────────────────────
 
 const buttonBase =
-	"rounded-[5px] border px-4 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
+	"cursor-pointer rounded-[5px] border px-4 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
 const cancelButton = cn(
 	buttonBase,
 	"border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#3a3a3a] text-(--text-primary) shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-gray-50 dark:hover:bg-[#444]",
@@ -113,21 +152,31 @@ const inputBase =
 
 <svelte:window onkeydown={handleKeydown} />
 
-<!-- Backdrop -->
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- Overlay wrapper -->
 <div
-  class={cn('fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[1px]')}
-  onclick={handleBackdropClick}
+  class={cn('fixed inset-0 z-50 flex items-center justify-center')}
+  transition:fade={{ duration: 150 }}
 >
+  <!-- Backdrop (accessible button, not in tab order) -->
+  <button
+    type="button"
+    class={cn('absolute inset-0 bg-black/30 backdrop-blur-[1px] cursor-default')}
+    onclick={handleCancel}
+    aria-label="Close dialog"
+    tabindex="-1"
+  ></button>
+
   <!-- Modal -->
   <div
+    bind:this={dialogEl}
     class={cn(
-      'w-[420px] rounded-lg border border-gray-300 dark:border-[#4a4a4a] bg-[#ececec] dark:bg-[#2d2d2d] shadow-2xl'
+      'relative w-[420px] rounded-lg border border-gray-300 dark:border-[#4a4a4a] bg-[#ececec] dark:bg-[#2d2d2d] shadow-2xl'
     )}
     role="dialog"
     aria-modal="true"
     aria-label={`Change fan control for ${fan.label}`}
+    aria-describedby="fan-modal-body"
+    transition:scale={{ duration: 150, start: 0.95, opacity: 0 }}
   >
     <!-- Title -->
     <div class={cn('px-6 pt-5 pb-4 text-center')}>
@@ -137,7 +186,7 @@ const inputBase =
     </div>
 
     <!-- Body -->
-    <div class={cn('px-6 pb-4 space-y-4')}>
+    <div id="fan-modal-body" class={cn('px-6 pb-4 space-y-4')}>
       <!-- Constant RPM option -->
       <label class={cn('flex items-center gap-3 cursor-pointer')}>
         <input
@@ -158,6 +207,7 @@ const inputBase =
             min={fan.min}
             max={fan.max}
             step={100}
+            aria-label={`Target RPM for ${fan.label}, range ${Math.round(fan.min)} to ${Math.round(fan.max)}`}
             class={cn(inputBase, 'w-24 text-right')}
           />
           <span class={cn('text-[11px] text-(--text-muted)')}>
@@ -183,6 +233,7 @@ const inputBase =
         {#if selectedMode === 'sensor_based'}
           <select
             bind:value={selectedSensorKey}
+            aria-label={`Temperature sensor for ${fan.label}`}
             class={cn(inputBase, 'ml-auto min-w-[180px]')}
           >
             {#each tempSensors as sensor (sensor.key)}
@@ -205,6 +256,7 @@ const inputBase =
                 min={0}
                 max={120}
                 step={1}
+                aria-label="Temperature to start increasing fan speed, degrees Celsius"
                 class={cn(inputBase, 'w-16 text-right')}
               />
               <span class={cn('text-[11px] text-(--text-muted)')}>°C</span>
@@ -220,9 +272,40 @@ const inputBase =
                 min={0}
                 max={120}
                 step={1}
+                aria-label="Maximum temperature threshold, degrees Celsius"
                 class={cn(inputBase, 'w-16 text-right')}
               />
               <span class={cn('text-[11px] text-(--text-muted)')}>°C</span>
+            </div>
+          </div>
+
+          <!-- Temperature range bar -->
+          <div class={cn('mt-1 space-y-1')} role="img" aria-label={rangeBarAriaLabel}>
+            <div class={cn('relative flex justify-between text-[10px] font-mono [font-variant-numeric:tabular-nums] text-(--text-muted)')}>
+              <span>{tempLow}°C</span>
+              {#if tempPosition !== null && selectedSensorValue !== null}
+                <span
+                  class={cn('absolute text-(--text-secondary) font-medium')}
+                  style="left: {tempPosition * 100}%; transform: translateX(-50%)"
+                >{Math.round(selectedSensorValue)}°C</span>
+              {/if}
+              <span>{tempHigh}°C</span>
+            </div>
+            <div class={cn('relative h-2 rounded-full overflow-hidden bg-(--surface-muted)')}>
+              <div
+                class={cn('absolute inset-0 rounded-full')}
+                style="background: linear-gradient(to right, var(--status-normal), var(--status-warm), var(--status-hot))"
+              ></div>
+              {#if tempPosition !== null}
+                <div
+                  class={cn('absolute top-1/2 w-3 h-3 rounded-full border-2 border-[#ececec] dark:border-[#2d2d2d] bg-(--text-primary) shadow-sm')}
+                  style="left: {tempPosition * 100}%; transform: translate(-50%, -50%)"
+                ></div>
+              {/if}
+            </div>
+            <div class={cn('flex justify-between text-[10px] text-(--text-muted)')}>
+              <span>Min fan</span>
+              <span>Max fan</span>
             </div>
           </div>
         </div>
@@ -230,12 +313,16 @@ const inputBase =
 
       <!-- Error message -->
       {#if errorMessage}
-        <div class={cn('text-[11px] text-center space-y-2')}>
+        <div
+          class={cn('text-[11px] text-center space-y-2')}
+          role="alert"
+          aria-live="assertive"
+        >
           <p class="text-red-500">{errorMessage}</p>
           {#if isPrivilegeError && !isDevModeError}
             <button
               type="button"
-              class={cn(buttonBase, 'border-amber-500 bg-amber-500 text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-amber-600')}
+              class={cn(buttonBase, 'min-h-[32px] border-amber-500 bg-amber-500 text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-amber-600')}
               onclick={handleRestartWithPrivileges}
             >
               Restart with Admin Privileges
@@ -252,6 +339,7 @@ const inputBase =
       </button>
       <button
         type="button"
+        bind:this={okButtonEl}
         class={okButton}
         disabled={isSubmitting}
         onclick={handleSubmit}

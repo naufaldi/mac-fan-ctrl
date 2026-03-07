@@ -196,9 +196,7 @@ describe("sensorListPaneState", () => {
 
 		// Temperature sensors with no data on this hardware are hidden; storage sensors remain
 		expect(allSensors.map((sensor) => sensor.name)).toEqual([
-			"Airport Proximity",
 			"Battery",
-			"Battery Gas Gauge",
 			"CPU Core Average",
 			"CPU Efficiency Core 1",
 			"CPU Efficiency Core 2",

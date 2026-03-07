@@ -10,9 +10,7 @@ type CatalogRow = {
 };
 
 const TARGET_CATALOG: ReadonlyArray<CatalogRow> = [
-	{ key: "TW0P", name: "Airport Proximity", unit: "C", sensor_type: "Other" },
 	{ key: "TB0T", name: "Battery", unit: "C", sensor_type: "Battery" },
-	{ key: "TB1T", name: "Battery Gas Gauge", unit: "C", sensor_type: "Battery" },
 	{ key: "TCPUAVG", name: "CPU Core Average", unit: "C", sensor_type: "Cpu" },
 	{ key: "TP0b", name: "CPU Efficiency Cluster 1", unit: "C", sensor_type: "Cpu" },
 	{ key: "TP1b", name: "CPU Efficiency Cluster 2", unit: "C", sensor_type: "Cpu" },
@@ -20,22 +18,34 @@ const TARGET_CATALOG: ReadonlyArray<CatalogRow> = [
 	{ key: "TG0D", name: "GPU Cluster 1", unit: "C", sensor_type: "Gpu" },
 	{ key: "TG0P", name: "GPU Cluster 2", unit: "C", sensor_type: "Gpu" },
 	{ key: "TGAVG", name: "GPU Cluster Average", unit: "C", sensor_type: "Gpu" },
-	{ key: "TaLC", name: "Airflow Left", unit: "C", sensor_type: "Other" },
-	{ key: "TaRC", name: "Airflow Right", unit: "C", sensor_type: "Other" },
-	{ key: "Th1H", name: "Heatpipe 1", unit: "C", sensor_type: "Other" },
-	{ key: "Th2H", name: "Heatpipe 2", unit: "C", sensor_type: "Other" },
 	{ key: "Tm0P", name: "Mainboard", unit: "C", sensor_type: "Other" },
-	{ key: "TTLD", name: "Thunderbolt Left", unit: "C", sensor_type: "Other" },
-	{ key: "TTRD", name: "Thunderbolt Right", unit: "C", sensor_type: "Other" },
 	{ key: "TM0P", name: "Memory Bank 1", unit: "C", sensor_type: "Memory" },
 	{ key: "TM1P", name: "Memory Bank 2", unit: "C", sensor_type: "Memory" },
 	{ key: "TPCD", name: "Power Manager Die Average", unit: "C", sensor_type: "Power" },
 	{ key: "PDTR", name: "Power Supply Proximity", unit: "W", sensor_type: "Power" },
 	{ key: "Ts0P", name: "Trackpad", unit: "C", sensor_type: "Trackpad" },
-	{ key: "Ts1P", name: "Trackpad Actuator", unit: "C", sensor_type: "Trackpad" },
 	{ key: "DISK_SECTION", name: "Disk Drives:", unit: "C", sensor_type: "Storage" },
 	{ key: "TN0n", name: "APPLE SSD", unit: "C", sensor_type: "Storage" },
 ];
+
+/** Sensor keys relevant for fan control decisions (heat sources, not peripherals). */
+const FAN_CONTROL_SENSOR_KEYS: ReadonlySet<string> = new Set([
+	"TCPUAVG", // CPU Core Average
+	"TP0b",    // CPU Efficiency Cluster 1
+	"TP1b",    // CPU Efficiency Cluster 2
+	"TP2b",    // CPU Performance Cluster
+	"TGAVG",   // GPU Cluster Average
+	"TG0D",    // GPU Cluster 1
+	"TG0P",    // GPU Cluster 2
+	"TPCD",    // Power Manager Die Average
+	"TB0T",    // Battery
+]);
+
+export function getFanControlSensors(sensors: Sensor[]): Sensor[] {
+	return sensors.filter(
+		(s) => s.unit === "C" && s.value !== null && FAN_CONTROL_SENSOR_KEYS.has(s.key),
+	);
+}
 
 const SENSOR_TYPE_ORDER: Record<SensorType, number> = {
 	Cpu: 0,
