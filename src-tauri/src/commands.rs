@@ -11,6 +11,10 @@ use crate::smc_writer::SmcWriter;
 
 pub const SENSOR_UPDATE_EVENT: &str = "sensor_update";
 
+// ── Tray handle wrapper ─────────────────────────────────────────────────────
+
+pub struct TrayHandle(pub tauri::tray::TrayIcon);
+
 // ── App state shared via Tauri ───────────────────────────────────────────────
 
 pub struct AppState {
@@ -149,12 +153,12 @@ pub fn get_fan_control_configs(
 pub fn get_presets(state: State<'_, AppState>) -> Result<Vec<Preset>, String> {
     let store = state.preset_store.lock().map_err(|e| e.to_string())?;
 
-    // Get current fan info for Full Blast preset
+    // Only need fan metadata (indices + max RPM) — skip expensive temperature/ioreg reads
     let mut service = SensorService::new();
-    let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
+    let fans = service.read_fans_only();
 
-    let fan_indices: Vec<u8> = sensor_data.fans.iter().map(|f| f.index).collect();
-    let fan_maxes: HashMap<u8, f32> = sensor_data.fans.iter().map(|f| (f.index, f.max)).collect();
+    let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
+    let fan_maxes: HashMap<u8, f32> = fans.iter().map(|f| (f.index, f.max)).collect();
 
     Ok(presets::all_presets(&store, &fan_indices, &fan_maxes))
 }
@@ -172,11 +176,12 @@ pub fn apply_preset(state: State<'_, AppState>, name: String) -> Result<(), Stri
         .as_ref()
         .ok_or_else(|| "SMC writer not available — fan control requires root".to_string())?;
 
+    // Only need fan metadata — skip expensive temperature/ioreg reads
     let mut service = SensorService::new();
-    let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
+    let fans = service.read_fans_only();
 
-    let fan_indices: Vec<u8> = sensor_data.fans.iter().map(|f| f.index).collect();
-    let fan_maxes: HashMap<u8, f32> = sensor_data.fans.iter().map(|f| (f.index, f.max)).collect();
+    let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
+    let fan_maxes: HashMap<u8, f32> = fans.iter().map(|f| (f.index, f.max)).collect();
 
     let mut store = state.preset_store.lock().map_err(|e| e.to_string())?;
     let all = presets::all_presets(&store, &fan_indices, &fan_maxes);
@@ -194,7 +199,7 @@ pub fn apply_preset(state: State<'_, AppState>, name: String) -> Result<(), Stri
     // Then apply preset configs
     for (fan_index, config) in &preset.configs {
         fan_control
-            .set_config(*fan_index, config.clone(), &sensor_data.fans, writer)
+            .set_config(*fan_index, config.clone(), &fans, writer)
             .map_err(|e| e.to_string())?;
     }
 
@@ -208,6 +213,20 @@ pub fn apply_preset(state: State<'_, AppState>, name: String) -> Result<(), Stri
 pub fn save_preset(state: State<'_, AppState>, name: String) -> Result<(), String> {
     let fan_control = state.fan_control.lock().map_err(|e| e.to_string())?;
     let configs = fan_control.configs().clone();
+
+    // Only need fan metadata for duplicate detection — skip expensive temperature/ioreg reads
+    let mut service = SensorService::new();
+    let fans = service.read_fans_only();
+    let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
+    let fan_maxes: HashMap<u8, f32> = fans.iter().map(|f| (f.index, f.max)).collect();
+
+    let store = state.preset_store.lock().map_err(|e| e.to_string())?;
+    if let Some(existing_name) =
+        presets::find_preset_with_matching_configs(&store, &configs, &fan_indices, &fan_maxes)
+    {
+        return Err(format!("duplicate:{existing_name}"));
+    }
+    drop(store);
 
     let preset = Preset {
         name: name.clone(),

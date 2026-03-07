@@ -16,6 +16,7 @@ let activePresetName: string = $state("Automatic");
 let isOpen: boolean = $state(false);
 let isSaveDialogOpen: boolean = $state(false);
 let savePresetName: string = $state("");
+let saveError: string = $state("");
 
 // ── Load presets ───────────────────────────────────────────────────────────
 
@@ -61,6 +62,7 @@ async function handleApplyPreset(name: string): Promise<void> {
 
 function openSaveDialog(): void {
 	savePresetName = "";
+	saveError = "";
 	isSaveDialogOpen = true;
 	closeDropdown();
 }
@@ -69,13 +71,21 @@ async function handleSavePreset(): Promise<void> {
 	const trimmed = savePresetName.trim();
 	if (trimmed.length === 0) return;
 
+	saveError = "";
 	try {
 		await savePreset(trimmed);
 		activePresetName = trimmed;
 		isSaveDialogOpen = false;
 		void refreshPresets();
 	} catch (error) {
-		console.error("[mac-fan-ctrl] Failed to save preset:", error);
+		const msg = error instanceof Error ? error.message : String(error);
+		if (msg.startsWith("duplicate:")) {
+			const existingName = msg.slice("duplicate:".length);
+			saveError = `This configuration already exists as '${existingName}'`;
+		} else {
+			console.error("[mac-fan-ctrl] Failed to save preset:", error);
+			saveError = "Failed to save preset";
+		}
 	}
 }
 
@@ -217,9 +227,15 @@ const dropdownItemClass =
         type="text"
         bind:value={savePresetName}
         placeholder="Preset name"
-        class="w-full rounded-[4px] border border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#2a2a2a] px-2 py-1.5 text-[12px] text-(--text-primary) focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
+        class={cn(
+          'w-full rounded-[4px] border bg-white dark:bg-[#2a2a2a] px-2 py-1.5 text-[12px] text-(--text-primary) focus:outline-none focus:ring-2 focus:ring-blue-500',
+          saveError ? 'border-red-400 dark:border-red-500 mb-1' : 'border-gray-300 dark:border-[#4a4a4a] mb-3'
+        )}
         onkeydown={(e) => { if (e.key === 'Enter') { void handleSavePreset(); } }}
       />
+      {#if saveError}
+        <p class="text-[11px] text-red-500 dark:text-red-400 mb-2">{saveError}</p>
+      {/if}
       <div class="flex justify-end gap-2">
         <button
           type="button"

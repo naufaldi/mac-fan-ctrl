@@ -67,6 +67,28 @@ pub fn builtin_full_blast(fan_indices: &[u8], fan_maxes: &HashMap<u8, f32>) -> P
     }
 }
 
+pub fn builtin_sensor(fan_indices: &[u8]) -> Preset {
+    let configs = fan_indices
+        .iter()
+        .map(|idx| {
+            (
+                *idx,
+                FanControlConfig::SensorBased {
+                    sensor_key: "TCPUAVG".to_string(),
+                    temp_low: 40.0,
+                    temp_high: 85.0,
+                },
+            )
+        })
+        .collect();
+
+    Preset {
+        name: "Sensor".to_string(),
+        builtin: true,
+        configs,
+    }
+}
+
 // ── Persistence ──────────────────────────────────────────────────────────────
 
 fn config_dir() -> PathBuf {
@@ -106,6 +128,7 @@ pub fn all_presets(
     let mut result = vec![
         builtin_automatic(),
         builtin_full_blast(fan_indices, fan_maxes),
+        builtin_sensor(fan_indices),
     ];
     result.extend(store.custom_presets.clone());
     result
@@ -127,6 +150,36 @@ pub fn delete_custom_preset(store: &mut PresetStore, name: &str) -> Result<(), S
         store.active_preset = Some("Automatic".to_string());
     }
     save_preset_store(store)
+}
+
+// ── Duplicate detection ──────────────────────────────────────────────────────
+
+/// Returns the name of an existing preset whose configs match the given configs,
+/// or `None` if no match is found. For the "Automatic" preset, an empty configs
+/// map (all Auto) is considered a match.
+pub fn find_preset_with_matching_configs(
+    store: &PresetStore,
+    configs: &HashMap<u8, FanControlConfig>,
+    fan_indices: &[u8],
+    fan_maxes: &HashMap<u8, f32>,
+) -> Option<String> {
+    let all = all_presets(store, fan_indices, fan_maxes);
+    all.into_iter()
+        .find(|preset| configs_match(&preset.configs, configs, fan_indices))
+        .map(|preset| preset.name)
+}
+
+/// Two config maps match if every fan index resolves to the same effective config.
+/// Missing entries are treated as `Auto`.
+fn configs_match(
+    a: &HashMap<u8, FanControlConfig>,
+    b: &HashMap<u8, FanControlConfig>,
+    fan_indices: &[u8],
+) -> bool {
+    let default = FanControlConfig::Auto;
+    fan_indices
+        .iter()
+        .all(|idx| a.get(idx).unwrap_or(&default) == b.get(idx).unwrap_or(&default))
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -166,6 +219,77 @@ mod tests {
     }
 
     #[test]
+    fn builtin_sensor_sets_all_fans_to_sensor_based() {
+        let indices = vec![0, 1];
+        let preset = builtin_sensor(&indices);
+        assert_eq!(preset.name, "Sensor");
+        assert!(preset.builtin);
+        assert_eq!(preset.configs.len(), 2);
+
+        match &preset.configs[&0] {
+            FanControlConfig::SensorBased {
+                sensor_key,
+                temp_low,
+                temp_high,
+            } => {
+                assert_eq!(sensor_key, "TCPUAVG");
+                assert_eq!(*temp_low, 40.0);
+                assert_eq!(*temp_high, 85.0);
+            }
+            _ => panic!("Expected SensorBased"),
+        }
+    }
+
+    #[test]
+    fn find_duplicate_detects_matching_automatic() {
+        let store = PresetStore::default();
+        let indices = vec![0];
+        let mut maxes = HashMap::new();
+        maxes.insert(0, 5800.0);
+
+        // Empty configs = Automatic
+        let configs = HashMap::new();
+        let result = find_preset_with_matching_configs(&store, &configs, &indices, &maxes);
+        assert_eq!(result, Some("Automatic".to_string()));
+    }
+
+    #[test]
+    fn find_duplicate_detects_matching_full_blast() {
+        let store = PresetStore::default();
+        let indices = vec![0];
+        let mut maxes = HashMap::new();
+        maxes.insert(0, 5800.0);
+
+        let mut configs = HashMap::new();
+        configs.insert(
+            0,
+            FanControlConfig::ConstantRpm {
+                target_rpm: 5800.0,
+            },
+        );
+        let result = find_preset_with_matching_configs(&store, &configs, &indices, &maxes);
+        assert_eq!(result, Some("Full Blast".to_string()));
+    }
+
+    #[test]
+    fn find_duplicate_returns_none_for_unique_config() {
+        let store = PresetStore::default();
+        let indices = vec![0];
+        let mut maxes = HashMap::new();
+        maxes.insert(0, 5800.0);
+
+        let mut configs = HashMap::new();
+        configs.insert(
+            0,
+            FanControlConfig::ConstantRpm {
+                target_rpm: 3000.0,
+            },
+        );
+        let result = find_preset_with_matching_configs(&store, &configs, &indices, &maxes);
+        assert_eq!(result, None);
+    }
+
+    #[test]
     fn all_presets_includes_builtins_and_custom() {
         let mut store = PresetStore::default();
         store.custom_presets.push(Preset {
@@ -179,10 +303,11 @@ mod tests {
         maxes.insert(0, 5800.0);
 
         let presets = all_presets(&store, &indices, &maxes);
-        assert_eq!(presets.len(), 3);
+        assert_eq!(presets.len(), 4);
         assert_eq!(presets[0].name, "Automatic");
         assert_eq!(presets[1].name, "Full Blast");
-        assert_eq!(presets[2].name, "Silent");
+        assert_eq!(presets[2].name, "Sensor");
+        assert_eq!(presets[3].name, "Silent");
     }
 
     #[test]
