@@ -50,7 +50,8 @@ mac-fan-ctrl/
 
 | Document | Purpose |
 |----------|---------|
-| `docs/task.md` | **Primary ticketing document** - Check this first for active work |
+| `docs/github-workflow.md` | **GitHub Issues workflow** - How to create, track, and close issues |
+| `docs/task.md` | Historical ticketing reference (new work uses GitHub Issues) |
 | `docs/rfc.md` | Technical architecture, component diagrams, API design |
 | `docs/prd.md` | Product requirements, Phase A/B features |
 | `docs/learning/` | Rust, Tauri, SMC learning resources |
@@ -180,17 +181,14 @@ export async function pingBackend(message: string): Promise<string> {
 }
 ```
 
-## Ticket Naming Convention
+## GitHub Issues Workflow
 
-```
-MACFAN-<epic>.<story>[-T<task>]
+This project uses GitHub Issues for task tracking. See [docs/github-workflow.md](docs/github-workflow.md) for the full workflow guide.
 
-Examples:
-- MACFAN-101.0     (Foundation epic)
-- MACFAN-101.0-T1  (Repository tooling task)
-- MACFAN-101.2     (Menu Bar + App Shell story)
-- MACFAN-101.2-T1  (Backend telemetry task)
-```
+- Claude manages issues autonomously (create, close, comment)
+- Use `gh issue list --state open` at session start
+- Use `closes #N` in commit messages to auto-close issues
+- Label issues with phase (`phase-a/b/c`) and area (`frontend`, `backend`, `smc`, `ui`)
 
 ## Definition of Done
 

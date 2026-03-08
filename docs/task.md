@@ -1,10 +1,8 @@
 # mac-fan-ctrl Ticketing, Delivery Plan, DoD, Dates
 
-> **Living Document**: This file is continuously updated throughout development.
-> - Ticket status updates happen here first
-> - Due dates shift based on actual progress
-> - New risks and blockers are logged immediately
-> - See Section 10 for recent updates
+> **Historical Reference**: New work is tracked in [GitHub Issues](https://github.com/naufaldi/mac-fan-ctrl/issues). See [docs/github-workflow.md](github-workflow.md) for the current workflow.
+>
+> This file is retained as historical reference for completed Sprint 0 work.
 
 ## 1) Purpose and Scope
 
