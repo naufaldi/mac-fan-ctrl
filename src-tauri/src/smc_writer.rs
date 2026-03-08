@@ -168,7 +168,10 @@ unsafe impl Sync for SmcWriter {}
 
 impl Drop for SmcWriter {
     fn drop(&mut self) {
-        // Best-effort: re-lock thermal control on shutdown
+        // Best-effort: restore all fans to auto and re-lock thermal control
+        for i in 0..8u8 {
+            let _ = self.set_fan_auto(i);
+        }
         let _ = self.lock_fan_control();
         unsafe {
             let _ = IOServiceClose(self.conn);

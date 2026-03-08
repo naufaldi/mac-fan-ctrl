@@ -1,14 +1,12 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.5/schema.json",
-  "formatter": {
-    "enabled": true
-  },
-  "linter": {
-    "enabled": true,
-    "rules": {
-      "correctness": {
-        "noUnusedVariables": "off"
-      }
-    }
-  }
+	"$schema": "https://biomejs.dev/schemas/2.4.5/schema.json",
+	"files": {
+		"includes": ["src/**", "e2e/**", "*.ts", "*.js", "*.json", "*.svelte"]
+	},
+	"css": {
+		"parser": {
+			"cssModules": false,
+			"tailwindDirectives": true
+		}
+	}
 }

@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
 use commands::AppState;
+use smc::FanMode;
 
 fn bootstrap_menu_bar(app: &mut tauri::App) {
     println!("[mac-fan-ctrl] Starting shell bootstrap");
@@ -194,8 +195,8 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
     });
 }
 
-fn restore_fans_on_close(window: &tauri::Window) {
-    let state = window.state::<AppState>();
+fn restore_fans(app_handle: &tauri::AppHandle) {
+    let state = app_handle.state::<AppState>();
     let Ok(writer_guard) = state.smc_writer.lock() else {
         return;
     };
@@ -205,8 +206,55 @@ fn restore_fans_on_close(window: &tauri::Window) {
     let Ok(mut control) = state.fan_control.lock() else {
         return;
     };
-    eprintln!("[mac-fan-ctrl] Window closing — restoring all fans to Auto");
+    eprintln!("[mac-fan-ctrl] Restoring all fans to Auto");
     control.restore_all_auto(writer);
+}
+
+fn recover_orphaned_fan_modes(app_handle: &tauri::AppHandle) {
+    let state = app_handle.state::<AppState>();
+
+    // Only recover if no active session configs exist (i.e. fresh startup)
+    if let Ok(control) = state.fan_control.lock() {
+        if !control.configs().is_empty() {
+            return;
+        }
+    }
+
+    let Ok(writer_guard) = state.smc_writer.lock() else {
+        return;
+    };
+    let Some(writer) = writer_guard.as_ref() else {
+        return;
+    };
+
+    let mut service = smc::SensorService::new();
+    let fans = service.read_fans_only();
+
+    let orphaned: Vec<u8> = fans
+        .iter()
+        .filter(|f| f.mode == FanMode::Forced)
+        .map(|f| f.index)
+        .collect();
+
+    if orphaned.is_empty() {
+        return;
+    }
+
+    eprintln!(
+        "[mac-fan-ctrl] RECOVERY: Found {} orphaned fan(s) in Forced mode: {:?}",
+        orphaned.len(),
+        orphaned
+    );
+
+    for fan_index in &orphaned {
+        match writer.set_fan_auto(*fan_index) {
+            Ok(()) => eprintln!("[mac-fan-ctrl] RECOVERY: Fan {fan_index} restored to Auto"),
+            Err(e) => eprintln!("[mac-fan-ctrl] RECOVERY: Failed to restore fan {fan_index}: {e}"),
+        }
+    }
+
+    let _ = writer.lock_fan_control();
+    eprintln!("[mac-fan-ctrl] RECOVERY: Thermal enforcement re-locked");
 }
 
 fn main() {
@@ -215,6 +263,7 @@ fn main() {
         .setup(|app| {
             bootstrap_menu_bar(app);
             run_startup_diagnostics(app.handle());
+            recover_orphaned_fan_modes(app.handle());
             restore_active_preset(app.handle());
 
             // Initialize menu bar tray icon
@@ -237,6 +286,16 @@ fn main() {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
+
+            // Register signal handler for SIGTERM/SIGINT
+            let signal_handle = app.handle().clone();
+            ctrlc::set_handler(move || {
+                eprintln!("[mac-fan-ctrl] Signal received — restoring fans to Auto");
+                restore_fans(&signal_handle);
+            })
+            .unwrap_or_else(|e| {
+                eprintln!("[mac-fan-ctrl] Signal handler registration failed: {e}");
+            });
 
             start_sensor_stream(app.handle().clone());
             Ok(())
@@ -264,10 +323,15 @@ fn main() {
                 let _ = window.hide();
             }
             tauri::WindowEvent::Destroyed => {
-                restore_fans_on_close(window);
+                restore_fans(window.app_handle());
             }
             _ => {}
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = &event {
+                restore_fans(app_handle);
+            }
+        });
 }

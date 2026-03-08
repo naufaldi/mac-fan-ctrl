@@ -2,7 +2,7 @@
 	"$schema": "../node_modules/@tauri-apps/cli/schema.json",
 	"productName": "mac-fan-ctrl",
 	"version": "0.1.0",
-	"identifier": "com.example.mac-fan-ctrl",
+	"identifier": "io.github.naufaldi.mac-fan-ctrl",
 	"build": {
 		"beforeDevCommand": "pnpm run dev",
 		"beforeBuildCommand": "pnpm run build",
@@ -21,7 +21,11 @@
 	},
 	"bundle": {
 		"active": true,
-		"icon": []
+		"icon": ["icons/icon.png"],
+		"macOS": {
+			"entitlements": "Entitlements.plist",
+			"signingIdentity": "-"
+		}
 	},
 	"plugins": {}
 }
