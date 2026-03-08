@@ -146,6 +146,7 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
                     Ok(mut sensor_data) => {
                         run_fan_control_tick(&app_handle, &mut sensor_data);
 
+                        eprintln!("[stream] cycle={cycle_count} emit(full)");
                         if let Err(error) =
                             app_handle.emit(commands::SENSOR_UPDATE_EVENT, &sensor_data)
                         {
@@ -153,6 +154,7 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
                         }
 
                         // Full tray update: temperature title + menu rebuild
+                        eprintln!("[stream] cycle={cycle_count} update_tray_title+menu");
                         tray::update_tray_title(&app_handle, &sensor_data);
                         tray::update_tray_menu(&app_handle, &sensor_data);
 
@@ -172,11 +174,13 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
 
                 run_fan_control_tick(&app_handle, cached);
 
+                eprintln!("[stream] cycle={cycle_count} emit(fast)");
                 if let Err(error) = app_handle.emit(commands::SENSOR_UPDATE_EVENT, &*cached) {
                     eprintln!("[mac-fan-ctrl] Failed to emit sensor_update event: {error}");
                 }
 
                 // Fast tray update: temperature title only
+                eprintln!("[stream] cycle={cycle_count} update_tray_title");
                 tray::update_tray_title(&app_handle, cached);
             }
 
@@ -226,6 +230,13 @@ fn main() {
             // Hide Dock icon — app lives in the menu bar
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // Bring window to front after Accessory policy change
+            // (macOS deactivates the app when removing its dock icon)
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
 
             start_sensor_stream(app.handle().clone());
             Ok(())

@@ -4,10 +4,44 @@
 //! provides quick access to fan controls, presets, and the main window.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tauri::menu::{CheckMenuItem, Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::tray::{TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{image::Image, AppHandle, Manager};
+
+/// Timestamp (millis since epoch) of last tray icon click.
+/// While the menu is likely open (within MENU_GUARD_MS of a click),
+/// we skip `set_menu()` calls to avoid macOS dismissing the dropdown.
+static LAST_TRAY_CLICK_MS: AtomicU64 = AtomicU64::new(0);
+
+/// How long (ms) to guard the menu from rebuilds after a click.
+/// 15 seconds is generous — users rarely keep a menu open longer.
+const MENU_GUARD_MS: u64 = 15_000;
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn is_menu_guarded() -> bool {
+    let last_click = LAST_TRAY_CLICK_MS.load(Ordering::Relaxed);
+    if last_click == 0 {
+        return false;
+    }
+    let elapsed = now_millis().saturating_sub(last_click);
+    elapsed < MENU_GUARD_MS
+}
+
+fn mark_menu_opened() {
+    LAST_TRAY_CLICK_MS.store(now_millis(), Ordering::Relaxed);
+}
+
+fn mark_menu_closed() {
+    LAST_TRAY_CLICK_MS.store(0, Ordering::Relaxed);
+}
 
 use crate::commands::{AppState, TrayHandle};
 use crate::fan_control::FanControlConfig;
@@ -159,11 +193,17 @@ pub fn update_tray_title(app_handle: &AppHandle, sensor_data: &SensorData) {
         .unwrap_or_else(|| "--°C".to_string());
 
     if let Some(tray_state) = app_handle.try_state::<TrayHandle>() {
+        eprintln!("[tray] set_title({cpu_temp_str})");
         let _ = tray_state.0.set_title(Some(&cpu_temp_str));
     }
 }
 
 pub fn update_tray_menu(app_handle: &AppHandle, sensor_data: &SensorData) {
+    // Skip menu rebuild while the dropdown is likely open to avoid dismissing it
+    if is_menu_guarded() {
+        return;
+    }
+
     let Some(tray_state) = app_handle.try_state::<TrayHandle>() else {
         return;
     };
@@ -186,13 +226,23 @@ pub fn update_tray_menu(app_handle: &AppHandle, sensor_data: &SensorData) {
         .map(|s| presets::all_presets(&s, &fan_indices, &fan_maxes))
         .unwrap_or_default();
 
-    if let Ok(menu) = build_tray_menu(
+    match build_tray_menu(
         app_handle,
         &sensor_data.fans,
         active_preset.as_deref(),
         &all_presets,
     ) {
-        let _ = tray_state.0.set_menu(Some(menu));
+        Ok(menu) => {
+            eprintln!(
+                "[tray] set_menu fans={} presets={}",
+                sensor_data.fans.len(),
+                all_presets.len()
+            );
+            let _ = tray_state.0.set_menu(Some(menu));
+        }
+        Err(e) => {
+            eprintln!("[tray] build_tray_menu FAILED: {e}");
+        }
     }
 }
 
@@ -200,6 +250,9 @@ pub fn update_tray_menu(app_handle: &AppHandle, sensor_data: &SensorData) {
 
 fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     let id = event.id().as_ref();
+    // Menu item was selected → menu is now closed
+    mark_menu_closed();
+    eprintln!("[tray] menu_event: id={id:?}");
 
     match id {
         SHOW_WINDOW => show_main_window(app),
@@ -226,8 +279,29 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
 }
 
 fn handle_tray_icon_event(tray: &TrayIcon, event: TrayIconEvent) {
-    if let TrayIconEvent::DoubleClick { .. } = event {
-        show_main_window(tray.app_handle());
+    match &event {
+        TrayIconEvent::Click {
+            button,
+            button_state,
+            ..
+        } => {
+            mark_menu_opened();
+            eprintln!("[tray] icon_event: Click button={button:?} state={button_state:?}");
+        }
+        TrayIconEvent::DoubleClick { .. } => {
+            eprintln!("[tray] icon_event: DoubleClick");
+            show_main_window(tray.app_handle());
+        }
+        TrayIconEvent::Enter { .. } => {
+            eprintln!("[tray] icon_event: Enter");
+        }
+        TrayIconEvent::Leave { .. } => {
+            eprintln!("[tray] icon_event: Leave");
+        }
+        TrayIconEvent::Move { .. } => {} // too noisy
+        _ => {
+            eprintln!("[tray] icon_event: other");
+        }
     }
 }
 
