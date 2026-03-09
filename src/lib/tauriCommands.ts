@@ -8,6 +8,26 @@ export async function pingBackend(message: string): Promise<string> {
 	return invoke<string>("ping_backend", { message });
 }
 
+// ── App info ────────────────────────────────────────────────────────────────
+
+export interface AppInfo {
+	name: string;
+	version: string;
+	identifier: string;
+}
+
+export async function getAppInfo(): Promise<AppInfo> {
+	return invoke<AppInfo>("get_app_info");
+}
+
+export async function listenShowAbout(
+	callback: () => void,
+): Promise<UnlistenFn> {
+	return listen("show-about", () => {
+		callback();
+	});
+}
+
 export async function getSensors(): Promise<SensorData> {
 	return invoke<SensorData>("get_sensors");
 }

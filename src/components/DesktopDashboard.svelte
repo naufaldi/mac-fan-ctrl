@@ -3,7 +3,8 @@ import { cn } from "$lib/cn";
 import type { SensorData as DesignTokenSensor } from "$lib/designTokens";
 import type { SensorData } from "$lib/types";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getPrivilegeStatus, openUrl, requestPrivilegeRestart } from "$lib/tauriCommands";
+import { getPrivilegeStatus, listenShowAbout, requestPrivilegeRestart } from "$lib/tauriCommands";
+import AboutDialog from "./AboutDialog.svelte";
 import FanControlPane from "./FanControlPane.svelte";
 import PresetDropdown from "./PresetDropdown.svelte";
 import SensorListPane from "./SensorListPane.svelte";
@@ -42,9 +43,13 @@ async function handleGrantAccess(): Promise<void> {
 	}
 }
 
-const GITHUB_REPO_URL = "https://github.com/nicholasgriffintn/mac-fan-ctrl";
-
 let showComingSoon: boolean = $state(false);
+let showAbout: boolean = $state(false);
+
+$effect(() => {
+	const unlistenPromise = listenShowAbout(() => { showAbout = true; });
+	return () => { unlistenPromise.then((unlisten) => unlisten()); };
+});
 
 async function handleHideToMenuBar(): Promise<void> {
 	try {
@@ -60,15 +65,6 @@ async function handlePreferences(): Promise<void> {
 	setTimeout(() => {
 		showComingSoon = false;
 	}, 2000);
-}
-
-async function handleHelp(): Promise<void> {
-	try {
-		await openUrl(GITHUB_REPO_URL);
-	} catch (error) {
-		const msg = error instanceof Error ? error.message : String(error);
-		console.error("[DesktopDashboard] Failed to open help URL:", msg);
-	}
 }
 
 const chromeButtonClass =
@@ -127,8 +123,12 @@ const chromeButtonClass =
     <button class={cn(chromeButtonClass)} type="button" onclick={handlePreferences}>
       Preferences...
     </button>
-    <button class={cn(chromeButtonClass, 'w-8 font-serif italic')} type="button" aria-label="Help" onclick={handleHelp}>
-      ?
+    <button class={cn(chromeButtonClass)} type="button" aria-label="About" onclick={() => { showAbout = true; }}>
+      About
     </button>
   </footer>
+
+  {#if showAbout}
+    <AboutDialog onclose={() => { showAbout = false; }} />
+  {/if}
 </section>

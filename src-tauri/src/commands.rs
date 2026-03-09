@@ -42,6 +42,25 @@ impl AppState {
     }
 }
 
+// ── App info ────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, Clone)]
+pub struct AppInfo {
+    pub name: String,
+    pub version: String,
+    pub identifier: String,
+}
+
+#[tauri::command]
+pub fn get_app_info(app_handle: tauri::AppHandle) -> Result<AppInfo, String> {
+    let config = app_handle.config();
+    Ok(AppInfo {
+        name: config.product_name.clone().unwrap_or_else(|| "Mac Fan Control".to_string()),
+        version: config.version.clone().unwrap_or_else(|| "0.0.0".to_string()),
+        identifier: config.identifier.clone(),
+    })
+}
+
 // ── Existing commands ────────────────────────────────────────────────────────
 
 #[tauri::command]

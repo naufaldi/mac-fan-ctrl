@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use tauri::menu::{CheckMenuItem, Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::tray::{TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{image::Image, AppHandle, Manager};
+use tauri::{image::Image, AppHandle, Emitter, Manager};
 
 /// Timestamp (millis since epoch) of last tray icon click.
 /// While the menu is likely open (within MENU_GUARD_MS of a click),
@@ -52,6 +52,7 @@ use crate::smc::{FanData, FanMode, SensorData, SensorService};
 // ── Menu item ID constants ──────────────────────────────────────────────────
 
 const SHOW_WINDOW: &str = "show_window";
+const ABOUT: &str = "about";
 const QUIT: &str = "quit";
 const PRESET_PREFIX: &str = "preset::";
 const FAN_AUTO_PREFIX: &str = "fan_auto::";
@@ -79,12 +80,16 @@ pub fn setup_tray(app: &mut tauri::App) -> Result<TrayIcon, tauri::Error> {
 
 fn build_initial_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     let show_item = MenuItem::with_id(app, SHOW_WINDOW, "Show Mac Fan Control", true, None::<&str>)?;
-    let sep = PredefinedMenuItem::separator(app)?;
+    let sep1 = PredefinedMenuItem::separator(app)?;
+    let about_item = MenuItem::with_id(app, ABOUT, "About Mac Fan Control", true, None::<&str>)?;
+    let sep2 = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, QUIT, "Quit Mac Fan Control", true, None::<&str>)?;
 
     MenuBuilder::new(app)
         .item(&show_item)
-        .item(&sep)
+        .item(&sep1)
+        .item(&about_item)
+        .item(&sep2)
         .item(&quit_item)
         .build()
 }
@@ -124,6 +129,8 @@ fn build_tray_menu(
         .collect();
 
     let sep3 = PredefinedMenuItem::separator(app)?;
+    let about_item = MenuItem::with_id(app, ABOUT, "About Mac Fan Control", true, None::<&str>)?;
+    let sep4 = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, QUIT, "Quit Mac Fan Control", true, None::<&str>)?;
 
     // Assemble the menu
@@ -142,7 +149,12 @@ fn build_tray_menu(
         builder = builder.item(preset_item);
     }
 
-    builder.item(&sep3).item(&quit_item).build()
+    builder
+        .item(&sep3)
+        .item(&about_item)
+        .item(&sep4)
+        .item(&quit_item)
+        .build()
 }
 
 fn build_fan_submenu(
@@ -257,6 +269,10 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
 
     match id {
         SHOW_WINDOW => show_main_window(app),
+        ABOUT => {
+            show_main_window(app);
+            let _ = app.emit("show-about", ());
+        }
         QUIT => quit_app(app),
         _ if id.starts_with(PRESET_PREFIX) => {
             let preset_name = &id[PRESET_PREFIX.len()..];

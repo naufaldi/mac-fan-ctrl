@@ -304,6 +304,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::ping_backend,
+            commands::get_app_info,
             commands::get_sensors,
             commands::set_fan_constant_rpm,
             commands::set_fan_sensor_control,
