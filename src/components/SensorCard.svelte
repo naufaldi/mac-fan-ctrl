@@ -28,7 +28,7 @@
 
 <div class={cn("bg-(--color-surface-card) hover:bg-(--color-surface-hover) rounded-(--radius-card) p-4 transition-colors")}>
   <div class={cn("flex items-center justify-between mb-2")}>
-    <span class={cn("text-sm font-medium text-gray-700")}>{label}</span>
+    <span class={cn("text-sm font-medium text-gray-700 dark:text-gray-200")}>{label}</span>
     <StatusDot {status} />
   </div>
 

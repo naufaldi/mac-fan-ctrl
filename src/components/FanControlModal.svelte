@@ -28,6 +28,7 @@ let tempLow: number = $state(40);
 let tempHigh: number = $state(90);
 let isSubmitting: boolean = $state(false);
 let errorMessage: string = $state("");
+let extremeWarningAcknowledged: boolean = $state(false);
 
 // ── Element refs ─────────────────────────────────────────────────────────
 
@@ -148,6 +149,32 @@ const okButton = cn(
 
 const inputBase =
 	"rounded-[4px] border border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#2a2a2a] px-2 py-1 text-[12px] text-(--text-primary) [font-variant-numeric:tabular-nums] focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+// ── Extreme settings detection ──────────────────────────────────────────
+
+const rpmRange = $derived(fan.max - fan.min);
+const isExtremeRpm = $derived(
+	selectedMode === "constant_rpm" &&
+	(clampedRpm < fan.min + rpmRange * 0.2 || clampedRpm > fan.min + rpmRange * 0.8)
+);
+const isExtremeTemp = $derived(
+	selectedMode === "sensor_based" &&
+	(tempHigh > 100 || tempLow < 25)
+);
+const hasExtremeSettings = $derived(isExtremeRpm || isExtremeTemp);
+const needsConfirmation = $derived(hasExtremeSettings && !extremeWarningAcknowledged);
+
+const extremeWarningMessage = $derived(
+	isExtremeRpm
+		? clampedRpm < fan.min + rpmRange * 0.2
+			? "Very low fan speed may cause overheating. The system will intervene at 95°C."
+			: "Very high fan speed increases noise and wear on the fan bearings."
+		: isExtremeTemp
+			? tempHigh > 100
+				? "Maximum temperature above 100°C risks thermal damage to components."
+				: "Low starting temperature (< 25°C) will keep fans running constantly."
+			: ""
+);
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -311,6 +338,25 @@ const inputBase =
         </div>
       {/if}
 
+      <!-- Extreme settings warning -->
+      {#if hasExtremeSettings}
+        <div class={cn('rounded-md border border-amber-400 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/30 p-3 space-y-2')} role="alert">
+          <p class={cn('text-[11px] text-amber-700 dark:text-amber-300 font-medium')}>
+            ⚠ {extremeWarningMessage}
+          </p>
+          {#if !extremeWarningAcknowledged}
+            <label class={cn('flex items-center gap-2 cursor-pointer')}>
+              <input
+                type="checkbox"
+                bind:checked={extremeWarningAcknowledged}
+                class="accent-amber-500"
+              />
+              <span class={cn('text-[11px] text-amber-600 dark:text-amber-400')}>I understand the risks</span>
+            </label>
+          {/if}
+        </div>
+      {/if}
+
       <!-- Error message -->
       {#if errorMessage}
         <div
@@ -341,7 +387,7 @@ const inputBase =
         type="button"
         bind:this={okButtonEl}
         class={okButton}
-        disabled={isSubmitting}
+        disabled={isSubmitting || needsConfirmation}
         onclick={handleSubmit}
       >
         OK

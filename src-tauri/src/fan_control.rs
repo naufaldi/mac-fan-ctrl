@@ -14,6 +14,7 @@ use crate::smc_writer::{SmcWriteApi, SmcWriteError};
 // ── Safety constants ─────────────────────────────────────────────────────────
 
 const EMERGENCY_TEMP_THRESHOLD: f64 = 95.0;
+const EMERGENCY_CLEAR_THRESHOLD: f64 = 90.0;
 
 /// Number of consecutive tick() cycles a sensor can be absent before
 /// the linked fan is forced to max RPM for thermal safety.
@@ -135,10 +136,10 @@ impl FanControlState {
             return Ok(());
         }
 
-        // If emergency was active but temps dropped, restore configs
-        if self.emergency_active {
+        // If emergency was active but temps dropped below clear threshold (hysteresis), restore configs
+        if self.emergency_active && max_temp < EMERGENCY_CLEAR_THRESHOLD {
             warn_log!(
-                "[mac-fan-ctrl] Emergency cleared: {max_temp:.1}°C < {EMERGENCY_TEMP_THRESHOLD}°C — restoring configs"
+                "[mac-fan-ctrl] Emergency cleared: {max_temp:.1}°C < {EMERGENCY_CLEAR_THRESHOLD}°C — restoring configs"
             );
             self.emergency_active = false;
             self.sensor_miss_counts.clear();
@@ -439,6 +440,42 @@ mod tests {
 
         state.tick(&sensors, &fans, &writer).unwrap();
         assert!(state.is_emergency_active());
+    }
+
+    // ── Thermal hysteresis (#19) ───────────────────────────────────────────
+
+    #[test]
+    fn emergency_stays_active_in_hysteresis_band() {
+        let writer = MockSmcWriter::new();
+        let mut state = FanControlState::new();
+        let fans = vec![make_fan(0, 1200.0, 5800.0)];
+
+        // Trigger emergency at 96°C
+        let hot = vec![make_sensor("TC0P", Some(96.0))];
+        state.tick(&hot, &fans, &writer).unwrap();
+        assert!(state.is_emergency_active());
+
+        // Drop to 92°C (between CLEAR=90 and TRIGGER=95) — should stay active
+        let warm = vec![make_sensor("TC0P", Some(92.0))];
+        state.tick(&warm, &fans, &writer).unwrap();
+        assert!(state.is_emergency_active(), "Emergency should remain active in hysteresis band (90–95°C)");
+    }
+
+    #[test]
+    fn emergency_clears_below_hysteresis_threshold() {
+        let writer = MockSmcWriter::new();
+        let mut state = FanControlState::new();
+        let fans = vec![make_fan(0, 1200.0, 5800.0)];
+
+        // Trigger emergency at 96°C
+        let hot = vec![make_sensor("TC0P", Some(96.0))];
+        state.tick(&hot, &fans, &writer).unwrap();
+        assert!(state.is_emergency_active());
+
+        // Drop to 89°C (below CLEAR=90) — should clear
+        let cool = vec![make_sensor("TC0P", Some(89.0))];
+        state.tick(&cool, &fans, &writer).unwrap();
+        assert!(!state.is_emergency_active(), "Emergency should clear below 90°C");
     }
 
     // ── Sensor disappearance (#8) ────────────────────────────────────────

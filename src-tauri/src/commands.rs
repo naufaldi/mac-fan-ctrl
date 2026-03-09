@@ -69,6 +69,9 @@ pub fn set_fan_constant_rpm(
 ) -> Result<(), String> {
     debug_log!("[cmd] set_fan_constant_rpm: fan_index={fan_index} rpm={rpm}");
 
+    if fan_index >= 10 {
+        return Err(format!("Invalid fan_index: {fan_index} — must be 0–9"));
+    }
     if !rpm.is_finite() || rpm < 0.0 {
         return Err(format!("Invalid RPM value: {rpm} — must be a finite non-negative number"));
     }
@@ -110,6 +113,9 @@ pub fn set_fan_sensor_control(
     temp_low: f32,
     temp_high: f32,
 ) -> Result<(), String> {
+    if fan_index >= 10 {
+        return Err(format!("Invalid fan_index: {fan_index} — must be 0–9"));
+    }
     if !temp_low.is_finite() || !temp_high.is_finite() {
         return Err("temp_low and temp_high must be finite numbers".to_string());
     }
@@ -147,6 +153,9 @@ pub fn set_fan_sensor_control(
 
 #[tauri::command]
 pub fn set_fan_auto(state: State<'_, AppState>, fan_index: u8) -> Result<(), String> {
+    if fan_index >= 10 {
+        return Err(format!("Invalid fan_index: {fan_index} — must be 0–9"));
+    }
     let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
     let writer = writer_guard
         .as_deref()
@@ -265,6 +274,22 @@ pub fn save_preset(state: State<'_, AppState>, name: String) -> Result<(), Strin
 pub fn delete_preset(state: State<'_, AppState>, name: String) -> Result<(), String> {
     let mut store = state.preset_store.lock().map_err(|e| e.to_string())?;
     presets::delete_custom_preset(&mut store, &name)
+}
+
+// ── Tray display commands ────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn set_tray_display_mode(mode: u8) -> Result<(), String> {
+    if mode > 1 {
+        return Err(format!("Invalid tray display mode: {mode} — must be 0 (temperature) or 1 (fan RPM)"));
+    }
+    crate::tray::set_tray_display_mode(mode);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_tray_display_mode() -> u8 {
+    crate::tray::get_tray_display_mode()
 }
 
 // ── Diagnostic commands ──────────────────────────────────────────────────

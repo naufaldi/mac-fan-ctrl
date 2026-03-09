@@ -92,6 +92,16 @@ export async function requestPrivilegeRestart(): Promise<void> {
 	return invoke<void>("request_privilege_restart");
 }
 
+// ── Tray display commands ────────────────────────────────────────────────────
+
+export async function setTrayDisplayMode(mode: number): Promise<void> {
+	return invoke<void>("set_tray_display_mode", { mode });
+}
+
+export async function getTrayDisplayMode(): Promise<number> {
+	return invoke<number>("get_tray_display_mode");
+}
+
 // ── URL commands ────────────────────────────────────────────────────────────
 
 export async function openUrl(url: string): Promise<void> {

@@ -159,3 +159,92 @@ pub fn read_apple_silicon_sensors() -> AppleSiliconSnapshot {
         unresolved,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── parse_number ────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_number_parses_plain_integer() {
+        assert_eq!(parse_number("2400"), Some(2400.0));
+    }
+
+    #[test]
+    fn parse_number_parses_quoted_integer() {
+        assert_eq!(parse_number("\"3050\""), Some(3050.0));
+    }
+
+    #[test]
+    fn parse_number_parses_with_whitespace() {
+        assert_eq!(parse_number("  1500  "), Some(1500.0));
+    }
+
+    #[test]
+    fn parse_number_returns_none_for_non_numeric() {
+        assert_eq!(parse_number("abc"), None);
+        assert_eq!(parse_number(""), None);
+    }
+
+    // ── to_celsius ──────────────────────────────────────────────────────
+
+    #[test]
+    fn to_celsius_converts_raw_above_1000() {
+        // raw > 1000: (raw / 10) - 273.15
+        let result = to_celsius(3050.0);
+        assert!((result - 31.85).abs() < 0.01);
+    }
+
+    #[test]
+    fn to_celsius_converts_raw_above_200() {
+        // raw > 200: raw - 273.15
+        let result = to_celsius(350.0);
+        assert!((result - 76.85).abs() < 0.01);
+    }
+
+    #[test]
+    fn to_celsius_passes_through_normal_range() {
+        // raw <= 200: treated as already Celsius
+        let result = to_celsius(45.0);
+        assert!((result - 45.0).abs() < 0.01);
+    }
+
+    // ── normalize_name ──────────────────────────────────────────────────
+
+    #[test]
+    fn normalize_name_maps_nand() {
+        let result = normalize_name("APPLE NAND Controller");
+        assert_eq!(result, Some(("TN0n", "APPLE SSD", "Storage")));
+    }
+
+    #[test]
+    fn normalize_name_maps_gas_gauge() {
+        let result = normalize_name("Gas Gauge Battery");
+        assert_eq!(result, Some(("TB1T", "Battery Gas Gauge", "Battery")));
+    }
+
+    #[test]
+    fn normalize_name_maps_battery() {
+        let result = normalize_name("Battery Pack");
+        assert_eq!(result, Some(("TB0T", "Battery", "Battery")));
+    }
+
+    #[test]
+    fn normalize_name_maps_gpu() {
+        let result = normalize_name("GPU0 Cluster");
+        assert_eq!(result, Some(("TGAVG", "GPU Cluster Average", "Gpu")));
+    }
+
+    #[test]
+    fn normalize_name_maps_pmu_tdie() {
+        let result = normalize_name("PMU tdie0");
+        assert_eq!(result, Some(("TCPUAVG", "CPU Core Average", "Cpu")));
+    }
+
+    #[test]
+    fn normalize_name_returns_none_for_unknown() {
+        assert_eq!(normalize_name("Unknown Sensor XYZ"), None);
+        assert_eq!(normalize_name(""), None);
+    }
+}

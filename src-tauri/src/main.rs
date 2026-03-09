@@ -318,6 +318,8 @@ fn main() {
             commands::request_privilege_restart,
             commands::diagnose_fan_control,
             commands::open_url,
+            commands::set_tray_display_mode,
+            commands::get_tray_display_mode,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
