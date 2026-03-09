@@ -3,8 +3,10 @@ import { cn } from "$lib/cn";
 import type { SensorData as DesignTokenSensor } from "$lib/designTokens";
 import type { SensorData } from "$lib/types";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getPrivilegeStatus, listenShowAbout, requestPrivilegeRestart } from "$lib/tauriCommands";
+import { getPrivilegeStatus, listenShowAbout, listenCheckForUpdates, requestPrivilegeRestart } from "$lib/tauriCommands";
 import AboutDialog from "./AboutDialog.svelte";
+import PreferencesDialog from "./PreferencesDialog.svelte";
+import UpdateDialog from "./UpdateDialog.svelte";
 import FanControlPane from "./FanControlPane.svelte";
 import PresetDropdown from "./PresetDropdown.svelte";
 import SensorListPane from "./SensorListPane.svelte";
@@ -43,8 +45,9 @@ async function handleGrantAccess(): Promise<void> {
 	}
 }
 
-let showComingSoon: boolean = $state(false);
+let showPreferences: boolean = $state(false);
 let showAbout: boolean = $state(false);
+let showUpdate: boolean = $state(false);
 let alwaysOnTop: boolean = $state(false);
 
 async function handleAlwaysOnTop(): Promise<void> {
@@ -63,6 +66,11 @@ $effect(() => {
 	return () => { unlistenPromise.then((unlisten) => unlisten()); };
 });
 
+$effect(() => {
+	const unlistenPromise = listenCheckForUpdates(() => { showUpdate = true; });
+	return () => { unlistenPromise.then((unlisten) => unlisten()); };
+});
+
 async function handleHideToMenuBar(): Promise<void> {
 	try {
 		await getCurrentWindow().hide();
@@ -72,11 +80,8 @@ async function handleHideToMenuBar(): Promise<void> {
 	}
 }
 
-async function handlePreferences(): Promise<void> {
-	showComingSoon = true;
-	setTimeout(() => {
-		showComingSoon = false;
-	}, 2000);
+function handlePreferences(): void {
+	showPreferences = true;
 }
 
 const chromeButtonClass =
@@ -142,18 +147,26 @@ const chromeButtonClass =
     <button class={cn(chromeButtonClass)} type="button" onclick={handleHideToMenuBar}>
       Hide to menu bar
     </button>
-    {#if showComingSoon}
-      <span class={cn("text-[11px] text-(--text-secondary) animate-pulse")}>Coming soon</span>
-    {/if}
     <button class={cn(chromeButtonClass)} type="button" onclick={handlePreferences}>
       Preferences...
+    </button>
+    <button class={cn(chromeButtonClass)} type="button" onclick={() => { showUpdate = true; }}>
+      Check for Updates
     </button>
     <button class={cn(chromeButtonClass)} type="button" aria-label="About" onclick={() => { showAbout = true; }}>
       About
     </button>
   </footer>
 
+  {#if showPreferences}
+    <PreferencesDialog onclose={() => { showPreferences = false; }} />
+  {/if}
+
   {#if showAbout}
     <AboutDialog onclose={() => { showAbout = false; }} />
+  {/if}
+
+  {#if showUpdate}
+    <UpdateDialog onclose={() => { showUpdate = false; }} />
   {/if}
 </section>

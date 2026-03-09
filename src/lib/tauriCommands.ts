@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { FanControlConfig, Preset, SensorData } from "./types";
+import type { FanControlConfig, PowerPresetConfig, PowerSource, Preset, SensorData } from "./types";
 
 export const SENSOR_UPDATE_EVENT = "sensor_update";
 
@@ -24,6 +24,14 @@ export async function listenShowAbout(
 	callback: () => void,
 ): Promise<UnlistenFn> {
 	return listen("show-about", () => {
+		callback();
+	});
+}
+
+export async function listenCheckForUpdates(
+	callback: () => void,
+): Promise<UnlistenFn> {
+	return listen("check-for-updates", () => {
 		callback();
 	});
 }
@@ -112,6 +120,28 @@ export async function savePreset(name: string): Promise<void> {
 
 export async function deletePreset(name: string): Promise<void> {
 	return invoke<void>("delete_preset", { name });
+}
+
+// ── Power preset commands ───────────────────────────────────────────────────
+
+export async function getPowerPresetConfig(): Promise<PowerPresetConfig> {
+	return invoke<PowerPresetConfig>("get_power_preset_config");
+}
+
+export async function setPowerPresetConfig(params: Partial<PowerPresetConfig>): Promise<PowerPresetConfig> {
+	return invoke<PowerPresetConfig>("set_power_preset_config", { params });
+}
+
+export async function getCurrentPowerSource(): Promise<PowerSource> {
+	return invoke<PowerSource>("get_current_power_source");
+}
+
+export async function listenToPowerSourceChanges(
+	onUpdate: (source: PowerSource) => void,
+): Promise<UnlistenFn> {
+	return listen<PowerSource>("power_source_changed", ({ payload }) => {
+		onUpdate(payload);
+	});
 }
 
 // ── Privilege commands ──────────────────────────────────────────────────────

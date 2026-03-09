@@ -3,6 +3,8 @@ mod apple_silicon_sensors;
 mod commands;
 mod fan_control;
 mod log;
+mod power_monitor;
+mod power_presets;
 mod presets;
 mod smc;
 mod smc_writer;
@@ -15,6 +17,7 @@ use tauri::{Emitter, Manager};
 
 use commands::AppState;
 use log::{debug_log, warn_log};
+use power_monitor::PowerSource;
 use smc::FanMode;
 
 fn bootstrap_menu_bar(app: &mut tauri::App) {
@@ -191,6 +194,95 @@ fn check_temperature_alerts(
     *last_alert_time = Some(Instant::now());
 }
 
+/// Shared helper: apply a named preset to all fans.
+/// Used by both tray preset selection and power source auto-switch.
+pub fn apply_preset_by_name(app_handle: &tauri::AppHandle, preset_name: &str) {
+    let state = app_handle.state::<AppState>();
+
+    let writer_guard = match state.smc_writer.lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    let Some(writer) = writer_guard.as_deref() else {
+        return;
+    };
+
+    let mut service = smc::SensorService::new();
+    let fans = service.read_fans_only();
+    let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
+    let fan_maxes: std::collections::HashMap<u8, f32> =
+        fans.iter().map(|f| (f.index, f.max)).collect();
+
+    let mut store = match state.preset_store.lock() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let all = presets::all_presets(&store, &fan_indices, &fan_maxes);
+    let Some(preset) = all.into_iter().find(|p| p.name == preset_name) else {
+        warn_log!("[mac-fan-ctrl] Preset '{preset_name}' not found — cannot apply");
+        return;
+    };
+
+    let mut control = match state.fan_control.lock() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    control.restore_all_auto(writer);
+    for (fan_index, config) in &preset.configs {
+        let _ = control.set_config(*fan_index, config.clone(), &fans, writer);
+    }
+
+    store.active_preset = Some(preset_name.to_string());
+    let _ = presets::save_preset_store(&store);
+    debug_log!("[mac-fan-ctrl] Applied preset '{preset_name}'");
+}
+
+fn check_power_source_change(
+    app_handle: &tauri::AppHandle,
+    last_power_source: &mut PowerSource,
+) {
+    let current = power_monitor::current_power_source();
+    if current == *last_power_source {
+        return;
+    }
+
+    let previous = *last_power_source;
+    *last_power_source = current;
+
+    debug_log!("[mac-fan-ctrl] Power source changed: {previous} -> {current}");
+
+    // Update stored state
+    let state = app_handle.state::<AppState>();
+    if let Ok(mut stored) = state.current_power_source.lock() {
+        *stored = current;
+    }
+
+    // Emit event to frontend
+    let _ = app_handle.emit("power_source_changed", current);
+
+    // Auto-apply configured preset
+    let config = match state.power_preset_config.lock() {
+        Ok(c) => c.clone(),
+        Err(_) => return,
+    };
+
+    if !config.enabled {
+        return;
+    }
+
+    let preset_name = match current {
+        PowerSource::Ac => config.ac_preset,
+        PowerSource::Battery => config.battery_preset,
+        PowerSource::Unknown => None,
+    };
+
+    if let Some(name) = preset_name {
+        debug_log!("[mac-fan-ctrl] Auto-switching to preset '{name}' for {current}");
+        apply_preset_by_name(app_handle, &name);
+    }
+}
+
 fn start_sensor_stream(app_handle: tauri::AppHandle) {
     thread::spawn(move || {
         let mut service = smc::SensorService::new();
@@ -199,6 +291,7 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
         let mut cycle_count: u32 = 0;
         let mut last_full_data: Option<smc::SensorData> = None;
         let mut last_alert_time: Option<Instant> = None;
+        let mut last_power_source = power_monitor::current_power_source();
 
         loop {
             let cycle_start = Instant::now();
@@ -210,6 +303,7 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
                     Ok(mut sensor_data) => {
                         run_fan_control_tick(&app_handle, &mut sensor_data);
                         check_temperature_alerts(&app_handle, &sensor_data, &mut last_alert_time);
+                        check_power_source_change(&app_handle, &mut last_power_source);
 
                         debug_log!("[stream] cycle={cycle_count} emit(full)");
                         if let Err(error) =
@@ -324,6 +418,7 @@ fn recover_orphaned_fan_modes(app_handle: &tauri::AppHandle) {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::new())
         .setup(|app| {
             bootstrap_menu_bar(app);
@@ -384,6 +479,9 @@ fn main() {
             commands::open_url,
             commands::get_alert_config,
             commands::set_alert_config,
+            commands::get_power_preset_config,
+            commands::set_power_preset_config,
+            commands::get_current_power_source,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {

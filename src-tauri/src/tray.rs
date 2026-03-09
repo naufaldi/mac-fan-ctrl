@@ -46,6 +46,7 @@ fn mark_menu_closed() {
 use crate::commands::{AppState, TrayHandle};
 use crate::fan_control::FanControlConfig;
 use crate::log::{debug_log, warn_log};
+use crate::power_monitor::PowerSource;
 use crate::presets;
 use crate::smc::{FanData, FanMode, SensorData, SensorService};
 
@@ -53,6 +54,7 @@ use crate::smc::{FanData, FanMode, SensorData, SensorService};
 
 const SHOW_WINDOW: &str = "show_window";
 const ABOUT: &str = "about";
+const CHECK_FOR_UPDATES: &str = "check_for_updates";
 const QUIT: &str = "quit";
 const PRESET_PREFIX: &str = "preset::";
 const FAN_AUTO_PREFIX: &str = "fan_auto::";
@@ -82,6 +84,7 @@ fn build_initial_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error>
     let show_item = MenuItem::with_id(app, SHOW_WINDOW, "Show Mac Fan Control", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let about_item = MenuItem::with_id(app, ABOUT, "About Mac Fan Control", true, None::<&str>)?;
+    let update_item = MenuItem::with_id(app, CHECK_FOR_UPDATES, "Check for Updates...", true, None::<&str>)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, QUIT, "Quit Mac Fan Control", true, None::<&str>)?;
 
@@ -89,6 +92,7 @@ fn build_initial_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error>
         .item(&show_item)
         .item(&sep1)
         .item(&about_item)
+        .item(&update_item)
         .item(&sep2)
         .item(&quit_item)
         .build()
@@ -101,9 +105,18 @@ fn build_tray_menu(
     fans: &[FanData],
     active_preset: Option<&str>,
     all_presets: &[presets::Preset],
+    power_source: PowerSource,
 ) -> Result<Menu<tauri::Wry>, tauri::Error> {
     let show_item = MenuItem::with_id(app, SHOW_WINDOW, "Show Mac Fan Control", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
+
+    // Power source indicator
+    let power_label = match power_source {
+        PowerSource::Ac => "Power: AC",
+        PowerSource::Battery => "Power: Battery",
+        PowerSource::Unknown => "Power: Unknown",
+    };
+    let power_item = MenuItem::with_id(app, "power_source", power_label, false, None::<&str>)?;
 
     // Available fans section
     let fans_header = MenuItem::with_id(app, "fans_header", "Available fans:", false, None::<&str>)?;
@@ -130,6 +143,7 @@ fn build_tray_menu(
 
     let sep3 = PredefinedMenuItem::separator(app)?;
     let about_item = MenuItem::with_id(app, ABOUT, "About Mac Fan Control", true, None::<&str>)?;
+    let update_item = MenuItem::with_id(app, CHECK_FOR_UPDATES, "Check for Updates...", true, None::<&str>)?;
     let sep4 = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, QUIT, "Quit Mac Fan Control", true, None::<&str>)?;
 
@@ -137,6 +151,7 @@ fn build_tray_menu(
     let mut builder = MenuBuilder::new(app)
         .item(&show_item)
         .item(&sep1)
+        .item(&power_item)
         .item(&fans_header);
 
     for submenu in &fan_submenus {
@@ -152,6 +167,7 @@ fn build_tray_menu(
     builder
         .item(&sep3)
         .item(&about_item)
+        .item(&update_item)
         .item(&sep4)
         .item(&quit_item)
         .build()
@@ -249,11 +265,19 @@ pub fn update_tray_menu(app_handle: &AppHandle, sensor_data: &SensorData) {
         .map(|s| presets::all_presets(&s, &fan_indices, &fan_maxes))
         .unwrap_or_default();
 
+    let power_source = app_state
+        .current_power_source
+        .lock()
+        .ok()
+        .map(|g| *g)
+        .unwrap_or(PowerSource::Unknown);
+
     match build_tray_menu(
         app_handle,
         &sensor_data.fans,
         active_preset.as_deref(),
         &all_presets,
+        power_source,
     ) {
         Ok(menu) => {
             debug_log!(
@@ -282,6 +306,10 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         ABOUT => {
             show_main_window(app);
             let _ = app.emit("show-about", ());
+        }
+        CHECK_FOR_UPDATES => {
+            show_main_window(app);
+            let _ = app.emit("check-for-updates", ());
         }
         QUIT => quit_app(app),
         _ if id.starts_with(PRESET_PREFIX) => {
@@ -359,42 +387,7 @@ fn apply_preset_from_tray(app: &AppHandle, preset_name: &str) {
     let app = app.clone();
 
     std::thread::spawn(move || {
-        let state = app.state::<AppState>();
-
-        let writer_guard = match state.smc_writer.lock() {
-            Ok(g) => g,
-            Err(_) => return,
-        };
-        let Some(writer) = writer_guard.as_deref() else {
-            return;
-        };
-
-        let mut service = SensorService::new();
-        let fans = service.read_fans_only();
-        let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
-        let fan_maxes: HashMap<u8, f32> = fans.iter().map(|f| (f.index, f.max)).collect();
-
-        let mut store = match state.preset_store.lock() {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        let all = presets::all_presets(&store, &fan_indices, &fan_maxes);
-        let Some(preset) = all.into_iter().find(|p| p.name == name) else {
-            return;
-        };
-
-        let mut control = match state.fan_control.lock() {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-
-        control.restore_all_auto(writer);
-        for (fan_index, config) in &preset.configs {
-            let _ = control.set_config(*fan_index, config.clone(), &fans, writer);
-        }
-
-        store.active_preset = Some(name);
-        let _ = presets::save_preset_store(&store);
+        crate::apply_preset_by_name(&app, &name);
     });
 }
 

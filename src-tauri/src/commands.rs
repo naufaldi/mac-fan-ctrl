@@ -7,6 +7,8 @@ use tauri::State;
 use crate::alerts::{self, AlertConfig};
 use crate::fan_control::{FanControlConfig, FanControlState};
 use crate::log::{debug_log, warn_log};
+use crate::power_monitor::PowerSource;
+use crate::power_presets::{self, PowerPresetConfig};
 use crate::presets::{self, Preset, PresetStore};
 use crate::smc::SensorService;
 use crate::smc_writer::{SmcWriteApi, SmcWriter};
@@ -24,6 +26,8 @@ pub struct AppState {
     pub smc_writer: Mutex<Option<Box<dyn SmcWriteApi>>>,
     pub preset_store: Mutex<PresetStore>,
     pub alert_config: Mutex<AlertConfig>,
+    pub power_preset_config: Mutex<PowerPresetConfig>,
+    pub current_power_source: Mutex<PowerSource>,
 }
 
 impl AppState {
@@ -41,6 +45,8 @@ impl AppState {
             smc_writer: Mutex::new(writer),
             preset_store: Mutex::new(presets::load_preset_store()),
             alert_config: Mutex::new(alerts::load_alert_config()),
+            power_preset_config: Mutex::new(power_presets::load_power_preset_config()),
+            current_power_source: Mutex::new(crate::power_monitor::current_power_source()),
         }
     }
 }
@@ -472,6 +478,48 @@ pub fn set_alert_config(
 
     alerts::save_alert_config(&config)?;
     Ok(config.clone())
+}
+
+// ── Power preset commands ────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_power_preset_config(state: State<'_, AppState>) -> Result<PowerPresetConfig, String> {
+    let config = state.power_preset_config.lock().map_err(|e| e.to_string())?;
+    Ok(config.clone())
+}
+
+#[derive(Deserialize)]
+pub struct SetPowerPresetConfigParams {
+    pub enabled: Option<bool>,
+    pub ac_preset: Option<Option<String>>,
+    pub battery_preset: Option<Option<String>>,
+}
+
+#[tauri::command]
+pub fn set_power_preset_config(
+    state: State<'_, AppState>,
+    params: SetPowerPresetConfigParams,
+) -> Result<PowerPresetConfig, String> {
+    let mut config = state.power_preset_config.lock().map_err(|e| e.to_string())?;
+
+    if let Some(enabled) = params.enabled {
+        config.enabled = enabled;
+    }
+    if let Some(ac_preset) = params.ac_preset {
+        config.ac_preset = ac_preset;
+    }
+    if let Some(battery_preset) = params.battery_preset {
+        config.battery_preset = battery_preset;
+    }
+
+    power_presets::save_power_preset_config(&config)?;
+    Ok(config.clone())
+}
+
+#[tauri::command]
+pub fn get_current_power_source(state: State<'_, AppState>) -> Result<PowerSource, String> {
+    let source = state.current_power_source.lock().map_err(|e| e.to_string())?;
+    Ok(*source)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

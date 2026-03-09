@@ -28,6 +28,12 @@
 		}
 	},
 	"plugins": {
-		"notification": {}
+		"notification": {},
+		"updater": {
+			"endpoints": [
+				"https://github.com/naufaldi/mac-fan-ctrl/releases/latest/download/latest.json"
+			],
+			"pubkey": "PLACEHOLDER_KEY_GENERATE_WITH_TAURI_SIGNER"
+		}
 	}
 }
