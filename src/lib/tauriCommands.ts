@@ -40,6 +40,22 @@ export async function listenToSensorUpdates(
 	});
 }
 
+// ── Alert commands ──────────────────────────────────────────────────────────
+
+export interface AlertConfig {
+	enabled: boolean;
+	cpu_threshold: number;
+	cooldown_secs: number;
+}
+
+export async function getAlertConfig(): Promise<AlertConfig> {
+	return invoke<AlertConfig>("get_alert_config");
+}
+
+export async function setAlertConfig(params: Partial<AlertConfig>): Promise<AlertConfig> {
+	return invoke<AlertConfig>("set_alert_config", { params });
+}
+
 // ── Fan control commands ─────────────────────────────────────────────────────
 
 export async function setFanConstantRpm(

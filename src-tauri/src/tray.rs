@@ -197,17 +197,27 @@ fn build_fan_submenu(
 // ── Tray updates (called from sensor stream) ────────────────────────────────
 
 pub fn update_tray_title(app_handle: &AppHandle, sensor_data: &SensorData) {
-    let cpu_temp_str = sensor_data
+    let cpu_temp = sensor_data
         .summary
         .cpu_package
         .as_ref()
-        .and_then(|s| s.value)
-        .map(|v| format!("{:.0}°C", v))
+        .and_then(|s| s.value);
+
+    let is_alert = app_handle
+        .try_state::<crate::commands::AppState>()
+        .and_then(|state| state.alert_config.lock().ok().map(|c| c.clone()))
+        .is_some_and(|config| {
+            config.enabled && cpu_temp.is_some_and(|t| t >= config.cpu_threshold)
+        });
+
+    let prefix = if is_alert { "⚠️ " } else { "" };
+    let temp_str = cpu_temp
+        .map(|v| format!("{prefix}{v:.0}°C"))
         .unwrap_or_else(|| "--°C".to_string());
 
     if let Some(tray_state) = app_handle.try_state::<TrayHandle>() {
-        debug_log!("[tray] set_title({cpu_temp_str})");
-        let _ = tray_state.0.set_title(Some(&cpu_temp_str));
+        debug_log!("[tray] set_title({temp_str})");
+        let _ = tray_state.0.set_title(Some(&temp_str));
     }
 }
 

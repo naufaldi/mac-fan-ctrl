@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::alerts::{self, AlertConfig};
 use crate::fan_control::{FanControlConfig, FanControlState};
 use crate::log::{debug_log, warn_log};
 use crate::presets::{self, Preset, PresetStore};
@@ -22,6 +23,7 @@ pub struct AppState {
     pub fan_control: Mutex<FanControlState>,
     pub smc_writer: Mutex<Option<Box<dyn SmcWriteApi>>>,
     pub preset_store: Mutex<PresetStore>,
+    pub alert_config: Mutex<AlertConfig>,
 }
 
 impl AppState {
@@ -38,6 +40,7 @@ impl AppState {
             fan_control: Mutex::new(FanControlState::new()),
             smc_writer: Mutex::new(writer),
             preset_store: Mutex::new(presets::load_preset_store()),
+            alert_config: Mutex::new(alerts::load_alert_config()),
         }
     }
 }
@@ -430,6 +433,45 @@ pub fn open_url(url: String) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+// ── Alert commands ───────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_alert_config(state: State<'_, AppState>) -> Result<AlertConfig, String> {
+    let config = state.alert_config.lock().map_err(|e| e.to_string())?;
+    Ok(config.clone())
+}
+
+#[derive(Deserialize)]
+pub struct SetAlertConfigParams {
+    pub enabled: Option<bool>,
+    pub cpu_threshold: Option<f64>,
+    pub cooldown_secs: Option<u64>,
+}
+
+#[tauri::command]
+pub fn set_alert_config(
+    state: State<'_, AppState>,
+    params: SetAlertConfigParams,
+) -> Result<AlertConfig, String> {
+    let mut config = state.alert_config.lock().map_err(|e| e.to_string())?;
+
+    if let Some(enabled) = params.enabled {
+        config.enabled = enabled;
+    }
+    if let Some(threshold) = params.cpu_threshold {
+        if !threshold.is_finite() || threshold < 0.0 || threshold > 150.0 {
+            return Err("CPU threshold must be between 0 and 150°C".to_string());
+        }
+        config.cpu_threshold = threshold;
+    }
+    if let Some(cooldown) = params.cooldown_secs {
+        config.cooldown_secs = cooldown;
+    }
+
+    alerts::save_alert_config(&config)?;
+    Ok(config.clone())
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

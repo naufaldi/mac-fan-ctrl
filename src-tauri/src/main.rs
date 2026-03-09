@@ -1,3 +1,4 @@
+mod alerts;
 mod apple_silicon_sensors;
 mod commands;
 mod fan_control;
@@ -131,6 +132,65 @@ fn restore_active_preset(app_handle: &tauri::AppHandle) {
     debug_log!("[mac-fan-ctrl] Preset '{preset_name}' restored successfully");
 }
 
+fn check_temperature_alerts(
+    app_handle: &tauri::AppHandle,
+    sensor_data: &smc::SensorData,
+    last_alert_time: &mut Option<Instant>,
+) {
+    let state = app_handle.state::<AppState>();
+    let config = match state.alert_config.lock() {
+        Ok(c) => c.clone(),
+        Err(_) => return,
+    };
+
+    if !config.enabled {
+        return;
+    }
+
+    let cpu_temp = sensor_data
+        .summary
+        .cpu_package
+        .as_ref()
+        .and_then(|s| s.value);
+
+    let Some(temp) = cpu_temp else {
+        return;
+    };
+
+    let is_over_threshold = temp >= config.cpu_threshold;
+
+    if !is_over_threshold {
+        return;
+    }
+
+    // Check cooldown
+    let cooldown = Duration::from_secs(config.cooldown_secs);
+    if let Some(last) = last_alert_time {
+        if last.elapsed() < cooldown {
+            return;
+        }
+    }
+
+    warn_log!(
+        "[mac-fan-ctrl] ALERT: CPU temp {temp:.1}°C >= {:.1}°C threshold",
+        config.cpu_threshold
+    );
+
+    // Fire native notification
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app_handle
+        .notification()
+        .builder()
+        .title("High Temperature Warning")
+        .body(format!(
+            "CPU temperature is {temp:.0}°C (threshold: {:.0}°C)",
+            config.cpu_threshold
+        ))
+        .show();
+
+    *last_alert_time = Some(Instant::now());
+}
+
 fn start_sensor_stream(app_handle: tauri::AppHandle) {
     thread::spawn(move || {
         let mut service = smc::SensorService::new();
@@ -138,6 +198,7 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
         let full_read_every = 3; // Do a full sensor read every Nth cycle
         let mut cycle_count: u32 = 0;
         let mut last_full_data: Option<smc::SensorData> = None;
+        let mut last_alert_time: Option<Instant> = None;
 
         loop {
             let cycle_start = Instant::now();
@@ -148,6 +209,7 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
                 match service.read_all_sensors() {
                     Ok(mut sensor_data) => {
                         run_fan_control_tick(&app_handle, &mut sensor_data);
+                        check_temperature_alerts(&app_handle, &sensor_data, &mut last_alert_time);
 
                         debug_log!("[stream] cycle={cycle_count} emit(full)");
                         if let Err(error) =
@@ -261,6 +323,7 @@ fn recover_orphaned_fan_modes(app_handle: &tauri::AppHandle) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState::new())
         .setup(|app| {
             bootstrap_menu_bar(app);
@@ -319,6 +382,8 @@ fn main() {
             commands::request_privilege_restart,
             commands::diagnose_fan_control,
             commands::open_url,
+            commands::get_alert_config,
+            commands::set_alert_config,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
