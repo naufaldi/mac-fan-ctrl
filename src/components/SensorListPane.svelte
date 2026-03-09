@@ -3,7 +3,10 @@
   import { cn } from "$lib/cn";
   import {
     getAllSensorsForDisplay,
+    getReadMoreLabel,
     isPerCoreTemperatureUnavailable,
+    shouldShowReadMore,
+    SUMMARY_SENSOR_LIMIT,
   } from "$lib/sensorListPaneState";
   import type { SensorData, Sensor } from "$lib/types";
 
@@ -18,6 +21,11 @@
     isPerCoreTemperatureUnavailable(sensorData)
   );
   const loading = $derived(!sensorData);
+  let expanded: boolean = $state(false);
+  const showReadMore = $derived(shouldShowReadMore(displaySensors.length));
+  const visibleSensors = $derived(
+    !expanded && showReadMore ? displaySensors.slice(0, SUMMARY_SENSOR_LIMIT) : displaySensors
+  );
   const cnClasses = (
     ...inputs: Array<string | undefined | null | false>
   ): string => cn(...inputs);
@@ -92,7 +100,7 @@
           <span>Per-core temperature not exposed on this Mac</span>
         </div>
       {/if}
-      {#each displaySensors as sensor (sensor.key)}
+      {#each visibleSensors as sensor (sensor.key)}
         {@const Icon = getSensorIcon(sensor.name)}
         <div
           class={cnClasses(
@@ -114,6 +122,17 @@
           </div>
         </div>
       {/each}
+      {#if showReadMore}
+        <button
+          type="button"
+          class={cnClasses(
+            "w-full border-t border-(--border-subtle) bg-(--surface-2) px-2 py-1.5 text-[11px] text-(--text-muted) hover:text-(--text-secondary) hover:bg-(--surface-hover) cursor-pointer transition-colors"
+          )}
+          onclick={() => { expanded = !expanded; }}
+        >
+          {getReadMoreLabel(expanded, displaySensors.length)}
+        </button>
+      {/if}
     </div>
   {:else}
     <div class={cnClasses("px-2 py-2 text-(--text-muted)")}>

@@ -45,6 +45,18 @@ async function handleGrantAccess(): Promise<void> {
 
 let showComingSoon: boolean = $state(false);
 let showAbout: boolean = $state(false);
+let alwaysOnTop: boolean = $state(false);
+
+async function handleAlwaysOnTop(): Promise<void> {
+	try {
+		const next = !alwaysOnTop;
+		await getCurrentWindow().setAlwaysOnTop(next);
+		alwaysOnTop = next;
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		console.error("[DesktopDashboard] Failed to set always-on-top:", msg);
+	}
+}
 
 $effect(() => {
 	const unlistenPromise = listenShowAbout(() => { showAbout = true; });
@@ -111,9 +123,22 @@ const chromeButtonClass =
 
   <footer
     class={cn(
-      "flex shrink-0 items-center justify-end gap-2 border-t border-gray-300 dark:border-black/50 bg-[#ececec] dark:bg-[#2d2d2d] px-4 py-2"
+      "flex shrink-0 items-center gap-2 border-t border-gray-300 dark:border-black/50 bg-[#ececec] dark:bg-[#2d2d2d] px-4 py-2"
     )}
   >
+    <button
+      class={cn(
+        chromeButtonClass,
+        alwaysOnTop && "border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300"
+      )}
+      type="button"
+      aria-label={alwaysOnTop ? "Unpin window" : "Pin window on top"}
+      aria-pressed={alwaysOnTop}
+      onclick={handleAlwaysOnTop}
+    >
+      {alwaysOnTop ? "Pinned" : "Pin on Top"}
+    </button>
+    <div class="grow"></div>
     <button class={cn(chromeButtonClass)} type="button" onclick={handleHideToMenuBar}>
       Hide to menu bar
     </button>
