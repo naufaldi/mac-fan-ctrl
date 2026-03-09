@@ -1,6 +1,6 @@
 {
 	"$schema": "../node_modules/@tauri-apps/cli/schema.json",
-	"productName": "mac-fan-ctrl",
+	"productName": "Mac Fan Control",
 	"version": "0.1.0",
 	"identifier": "io.github.naufaldi.mac-fan-ctrl",
 	"build": {
@@ -13,7 +13,7 @@
 		"macOSPrivateApi": true,
 		"windows": [
 			{
-				"title": "mac-fan-ctrl",
+				"title": "Mac Fan Control",
 				"width": 960,
 				"height": 540
 			}

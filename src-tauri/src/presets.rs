@@ -49,14 +49,14 @@ pub fn builtin_automatic() -> Preset {
 pub fn builtin_full_blast(fan_indices: &[u8], fan_maxes: &HashMap<u8, f32>) -> Preset {
     let configs = fan_indices
         .iter()
-        .filter_map(|idx| {
+        .map(|idx| {
             let max_rpm = fan_maxes.get(idx).copied().unwrap_or(6000.0);
-            Some((
+            (
                 *idx,
                 FanControlConfig::ConstantRpm {
                     target_rpm: max_rpm,
                 },
-            ))
+            )
         })
         .collect();
 

@@ -17,6 +17,8 @@ let isOpen: boolean = $state(false);
 let isSaveDialogOpen: boolean = $state(false);
 let savePresetName: string = $state("");
 let saveError: string = $state("");
+let applyError: string = $state("");
+let deleteError: string = $state("");
 
 // ── Load presets ───────────────────────────────────────────────────────────
 
@@ -48,15 +50,21 @@ function toggleDropdown(): void {
 
 function closeDropdown(): void {
 	isOpen = false;
+	applyError = "";
+	deleteError = "";
 }
 
 async function handleApplyPreset(name: string): Promise<void> {
+	applyError = "";
+	deleteError = "";
 	try {
 		await applyPreset(name);
 		activePresetName = name;
 		closeDropdown();
 	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
 		console.error("[mac-fan-ctrl] Failed to apply preset:", error);
+		applyError = `Failed to apply preset '${name}': ${msg}`;
 	}
 }
 
@@ -94,11 +102,15 @@ async function handleDeletePreset(
 	event: MouseEvent,
 ): Promise<void> {
 	event.stopPropagation();
+	applyError = "";
+	deleteError = "";
 	try {
 		await deletePreset(name);
 		void refreshPresets();
 	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
 		console.error("[mac-fan-ctrl] Failed to delete preset:", error);
+		deleteError = `Failed to delete preset '${name}': ${msg}`;
 	}
 }
 
@@ -191,6 +203,18 @@ const dropdownItemClass =
             </span>
           </button>
         {/each}
+      {/if}
+
+      <!-- Apply/delete errors -->
+      {#if applyError}
+        <div class={cn("px-3 py-1.5")}>
+          <p class={cn("text-[11px] text-red-500 dark:text-red-400")}>{applyError}</p>
+        </div>
+      {/if}
+      {#if deleteError}
+        <div class={cn("px-3 py-1.5")}>
+          <p class={cn("text-[11px] text-red-500 dark:text-red-400")}>{deleteError}</p>
+        </div>
       {/if}
 
       <!-- Save current -->

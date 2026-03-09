@@ -5,9 +5,10 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::fan_control::{FanControlConfig, FanControlState};
+use crate::log::{debug_log, warn_log};
 use crate::presets::{self, Preset, PresetStore};
 use crate::smc::SensorService;
-use crate::smc_writer::SmcWriter;
+use crate::smc_writer::{SmcWriteApi, SmcWriter};
 
 pub const SENSOR_UPDATE_EVENT: &str = "sensor_update";
 
@@ -19,18 +20,19 @@ pub struct TrayHandle(pub tauri::tray::TrayIcon);
 
 pub struct AppState {
     pub fan_control: Mutex<FanControlState>,
-    pub smc_writer: Mutex<Option<SmcWriter>>,
+    pub smc_writer: Mutex<Option<Box<dyn SmcWriteApi>>>,
     pub preset_store: Mutex<PresetStore>,
 }
 
 impl AppState {
     pub fn new() -> Self {
-        let writer = SmcWriter::new()
+        let writer: Option<Box<dyn SmcWriteApi>> = SmcWriter::new()
             .map_err(|e| {
-                eprintln!("[mac-fan-ctrl] SMC writer init failed (fan control disabled): {e}");
+                warn_log!("[mac-fan-ctrl] SMC writer init failed (fan control disabled): {e}");
                 e
             })
-            .ok();
+            .ok()
+            .map(|w| Box::new(w) as Box<dyn SmcWriteApi>);
 
         Self {
             fan_control: Mutex::new(FanControlState::new()),
@@ -65,16 +67,21 @@ pub fn set_fan_constant_rpm(
     fan_index: u8,
     rpm: f32,
 ) -> Result<(), String> {
-    eprintln!("[cmd] set_fan_constant_rpm: fan_index={fan_index} rpm={rpm}");
+    debug_log!("[cmd] set_fan_constant_rpm: fan_index={fan_index} rpm={rpm}");
+
+    if !rpm.is_finite() || rpm < 0.0 {
+        return Err(format!("Invalid RPM value: {rpm} — must be a finite non-negative number"));
+    }
+
     let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
     let writer = writer_guard
-        .as_ref()
+        .as_deref()
         .ok_or_else(|| "SMC writer not available — fan control requires root".to_string())?;
 
     let mut service = SensorService::new();
     let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
 
-    eprintln!(
+    debug_log!(
         "[cmd] fan data: {:?}",
         sensor_data
             .fans
@@ -91,7 +98,7 @@ pub fn set_fan_constant_rpm(
         .set_config(fan_index, config, &sensor_data.fans, writer)
         .map_err(|e| e.to_string());
 
-    eprintln!("[cmd] set_fan_constant_rpm result: {result:?}");
+    debug_log!("[cmd] set_fan_constant_rpm result: {result:?}");
     result
 }
 
@@ -103,13 +110,27 @@ pub fn set_fan_sensor_control(
     temp_low: f32,
     temp_high: f32,
 ) -> Result<(), String> {
+    if !temp_low.is_finite() || !temp_high.is_finite() {
+        return Err("temp_low and temp_high must be finite numbers".to_string());
+    }
+    if temp_low >= temp_high {
+        return Err(format!(
+            "temp_low ({temp_low}) must be strictly less than temp_high ({temp_high})"
+        ));
+    }
+
     let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
     let writer = writer_guard
-        .as_ref()
+        .as_deref()
         .ok_or_else(|| "SMC writer not available — fan control requires root".to_string())?;
 
     let mut service = SensorService::new();
     let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
+
+    let sensor_exists = sensor_data.details.iter().any(|s| s.key == sensor_key);
+    if !sensor_exists {
+        return Err(format!("Sensor key '{sensor_key}' not found in current sensor list"));
+    }
 
     let config = FanControlConfig::SensorBased {
         sensor_key,
@@ -128,7 +149,7 @@ pub fn set_fan_sensor_control(
 pub fn set_fan_auto(state: State<'_, AppState>, fan_index: u8) -> Result<(), String> {
     let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
     let writer = writer_guard
-        .as_ref()
+        .as_deref()
         .ok_or_else(|| "SMC writer not available — fan control requires root".to_string())?;
 
     state
@@ -173,7 +194,7 @@ pub fn get_active_preset(state: State<'_, AppState>) -> Result<Option<String>, S
 pub fn apply_preset(state: State<'_, AppState>, name: String) -> Result<(), String> {
     let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
     let writer = writer_guard
-        .as_ref()
+        .as_deref()
         .ok_or_else(|| "SMC writer not available — fan control requires root".to_string())?;
 
     // Only need fan metadata — skip expensive temperature/ioreg reads
@@ -250,7 +271,7 @@ pub fn delete_preset(state: State<'_, AppState>, name: String) -> Result<(), Str
 
 #[tauri::command]
 pub fn diagnose_fan_control(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    eprintln!("[cmd] diagnose_fan_control called");
+    debug_log!("[cmd] diagnose_fan_control called");
 
     // System info
     let mut lines: Vec<String> = Vec::new();
@@ -291,7 +312,7 @@ pub fn diagnose_fan_control(state: State<'_, AppState>) -> Result<Vec<String>, S
 
     // SMC writer status
     let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
-    match writer_guard.as_ref() {
+    match writer_guard.as_deref() {
         Some(writer) => {
             lines.push("SMC Writer: AVAILABLE".to_string());
             let diag = writer.diagnose_fan_control();
@@ -303,11 +324,11 @@ pub fn diagnose_fan_control(state: State<'_, AppState>) -> Result<Vec<String>, S
     }
 
     // Print to stderr too for terminal visibility
-    eprintln!("\n========================================");
+    debug_log!("\n========================================");
     for line in &lines {
-        eprintln!("[diag] {line}");
+        debug_log!("[diag] {line}");
     }
-    eprintln!("========================================\n");
+    debug_log!("========================================\n");
 
     Ok(lines)
 }
@@ -376,6 +397,20 @@ pub fn request_privilege_restart(app_handle: tauri::AppHandle) -> Result<(), Str
     // Exit current unprivileged instance
     app_handle.exit(0);
     Ok(())
+}
+
+// ── URL commands ─────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("Only https:// URLs are supported".to_string());
+    }
+    std::process::Command::new("open")
+        .arg(&url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

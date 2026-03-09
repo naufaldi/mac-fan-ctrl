@@ -2,7 +2,7 @@
 	"name": "mac-fan-ctrl",
 	"version": "0.1.0",
 	"private": true,
-	"description": "Svelte + Tauri vertical slice for MACFAN-101.0-T4",
+	"description": "macOS fan control application built with Tauri v2 and Svelte 5",
 	"type": "module",
 	"scripts": {
 		"dev": "vite",

@@ -45,6 +45,7 @@ fn mark_menu_closed() {
 
 use crate::commands::{AppState, TrayHandle};
 use crate::fan_control::FanControlConfig;
+use crate::log::{debug_log, warn_log};
 use crate::presets;
 use crate::smc::{FanData, FanMode, SensorData, SensorService};
 
@@ -193,7 +194,7 @@ pub fn update_tray_title(app_handle: &AppHandle, sensor_data: &SensorData) {
         .unwrap_or_else(|| "--°C".to_string());
 
     if let Some(tray_state) = app_handle.try_state::<TrayHandle>() {
-        eprintln!("[tray] set_title({cpu_temp_str})");
+        debug_log!("[tray] set_title({cpu_temp_str})");
         let _ = tray_state.0.set_title(Some(&cpu_temp_str));
     }
 }
@@ -233,7 +234,7 @@ pub fn update_tray_menu(app_handle: &AppHandle, sensor_data: &SensorData) {
         &all_presets,
     ) {
         Ok(menu) => {
-            eprintln!(
+            debug_log!(
                 "[tray] set_menu fans={} presets={}",
                 sensor_data.fans.len(),
                 all_presets.len()
@@ -241,7 +242,7 @@ pub fn update_tray_menu(app_handle: &AppHandle, sensor_data: &SensorData) {
             let _ = tray_state.0.set_menu(Some(menu));
         }
         Err(e) => {
-            eprintln!("[tray] build_tray_menu FAILED: {e}");
+            warn_log!("[tray] build_tray_menu FAILED: {e}");
         }
     }
 }
@@ -252,7 +253,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     let id = event.id().as_ref();
     // Menu item was selected → menu is now closed
     mark_menu_closed();
-    eprintln!("[tray] menu_event: id={id:?}");
+    debug_log!("[tray] menu_event: id={id:?}");
 
     match id {
         SHOW_WINDOW => show_main_window(app),
@@ -286,21 +287,21 @@ fn handle_tray_icon_event(tray: &TrayIcon, event: TrayIconEvent) {
             ..
         } => {
             mark_menu_opened();
-            eprintln!("[tray] icon_event: Click button={button:?} state={button_state:?}");
+            debug_log!("[tray] icon_event: Click button={button:?} state={button_state:?}");
         }
         TrayIconEvent::DoubleClick { .. } => {
-            eprintln!("[tray] icon_event: DoubleClick");
+            debug_log!("[tray] icon_event: DoubleClick");
             show_main_window(tray.app_handle());
         }
         TrayIconEvent::Enter { .. } => {
-            eprintln!("[tray] icon_event: Enter");
+            debug_log!("[tray] icon_event: Enter");
         }
         TrayIconEvent::Leave { .. } => {
-            eprintln!("[tray] icon_event: Leave");
+            debug_log!("[tray] icon_event: Leave");
         }
         TrayIconEvent::Move { .. } => {} // too noisy
         _ => {
-            eprintln!("[tray] icon_event: other");
+            debug_log!("[tray] icon_event: other");
         }
     }
 }
@@ -320,7 +321,7 @@ fn quit_app(app: &AppHandle) {
     if let (Ok(writer_guard), Ok(mut control)) =
         (state.smc_writer.lock(), state.fan_control.lock())
     {
-        if let Some(writer) = writer_guard.as_ref() {
+        if let Some(writer) = writer_guard.as_deref() {
             control.restore_all_auto(writer);
         }
     }
@@ -338,7 +339,7 @@ fn apply_preset_from_tray(app: &AppHandle, preset_name: &str) {
             Ok(g) => g,
             Err(_) => return,
         };
-        let Some(writer) = writer_guard.as_ref() else {
+        let Some(writer) = writer_guard.as_deref() else {
             return;
         };
 
@@ -380,7 +381,7 @@ fn set_fan_auto_from_tray(app: &AppHandle, fan_index: u8) {
             Ok(g) => g,
             Err(_) => return,
         };
-        let Some(writer) = writer_guard.as_ref() else {
+        let Some(writer) = writer_guard.as_deref() else {
             return;
         };
         let mut control = match state.fan_control.lock() {
@@ -400,7 +401,7 @@ fn set_fan_rpm_from_tray(app: &AppHandle, fan_index: u8, rpm: f32) {
             Ok(g) => g,
             Err(_) => return,
         };
-        let Some(writer) = writer_guard.as_ref() else {
+        let Some(writer) = writer_guard.as_deref() else {
             return;
         };
 

@@ -17,6 +17,8 @@ use std::os::raw::c_void;
 use std::time::Duration;
 use thiserror::Error;
 
+use crate::log::{debug_log, warn_log};
+
 // ── Error types ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Error)]
@@ -154,6 +156,26 @@ struct SmcKeyData {
     bytes: SmcBytes,
 }
 
+// ── Public trait for fan control writes ──────────────────────────────────────
+
+/// Abstraction over SMC write operations, enabling mock-based testing of
+/// safety-critical fan control logic without hardware access.
+pub trait SmcWriteApi: Send + Sync {
+    fn set_fan_target_rpm(
+        &self,
+        fan_index: u8,
+        rpm: f32,
+        min_rpm: f32,
+        max_rpm: f32,
+    ) -> Result<(), SmcWriteError>;
+
+    fn set_fan_auto(&self, fan_index: u8) -> Result<(), SmcWriteError>;
+    fn lock_fan_control(&self) -> Result<(), SmcWriteError>;
+    #[allow(dead_code)]
+    fn unlock_fan_control(&self) -> Result<(), SmcWriteError>;
+    fn diagnose_fan_control(&self) -> Vec<String>;
+}
+
 // ── Public writer struct ─────────────────────────────────────────────────────
 
 /// Owns a separate IOKit connection to `AppleSMC` for writing keys.
@@ -170,12 +192,40 @@ impl Drop for SmcWriter {
     fn drop(&mut self) {
         // Best-effort: restore all fans to auto and re-lock thermal control
         for i in 0..8u8 {
-            let _ = self.set_fan_auto(i);
+            let _ = self.set_fan_auto_impl(i);
         }
-        let _ = self.lock_fan_control();
+        let _ = self.lock_fan_control_impl();
         unsafe {
             let _ = IOServiceClose(self.conn);
         }
+    }
+}
+
+impl SmcWriteApi for SmcWriter {
+    fn set_fan_target_rpm(
+        &self,
+        fan_index: u8,
+        rpm: f32,
+        min_rpm: f32,
+        max_rpm: f32,
+    ) -> Result<(), SmcWriteError> {
+        self.set_fan_target_rpm_impl(fan_index, rpm, min_rpm, max_rpm)
+    }
+
+    fn set_fan_auto(&self, fan_index: u8) -> Result<(), SmcWriteError> {
+        self.set_fan_auto_impl(fan_index)
+    }
+
+    fn lock_fan_control(&self) -> Result<(), SmcWriteError> {
+        self.lock_fan_control_impl()
+    }
+
+    fn unlock_fan_control(&self) -> Result<(), SmcWriteError> {
+        self.unlock_fan_control_impl()
+    }
+
+    fn diagnose_fan_control(&self) -> Vec<String> {
+        self.diagnose_fan_control_impl()
     }
 }
 
@@ -183,13 +233,13 @@ impl SmcWriter {
     /// Opens a new connection to the AppleSMC kernel service.
     pub fn new() -> Result<Self, SmcWriteError> {
         let conn = unsafe { smc_open() }?;
-        eprintln!("[smc_writer] SmcWriter::new() — connection opened (conn={conn})");
+        debug_log!("[smc_writer] SmcWriter::new() — connection opened (conn={conn})");
         Ok(Self { conn })
     }
 
     /// Dumps full diagnostic info for fan control debugging.
     /// Does NOT write anything — purely reads SMC state.
-    pub fn diagnose_fan_control(&self) -> Vec<String> {
+    fn diagnose_fan_control_impl(&self) -> Vec<String> {
         let mut lines: Vec<String> = Vec::new();
 
         lines.push("=== SMC Fan Control Diagnostic Report ===".to_string());
@@ -314,7 +364,7 @@ impl SmcWriter {
 
         // Also print to stderr
         for line in &lines {
-            eprintln!("[diag] {line}");
+            debug_log!("[diag] {line}");
         }
 
         lines
@@ -324,53 +374,53 @@ impl SmcWriter {
 
     /// Sets the `Ftst` (force-test) diagnostic flag to inhibit
     /// `thermalmonitord` thermal enforcement, allowing fan mode writes.
-    pub fn unlock_fan_control(&self) -> Result<(), SmcWriteError> {
+    fn unlock_fan_control_impl(&self) -> Result<(), SmcWriteError> {
         let key = u32::from_be_bytes(*b"Ftst");
-        eprintln!("[smc_writer] unlock_fan_control: reading Ftst key info...");
+        debug_log!("[smc_writer] unlock_fan_control: reading Ftst key info...");
         let key_info = self.read_key_info(key)?;
         let type_bytes = key_info.data_type.to_be_bytes();
         let type_str = String::from_utf8_lossy(&type_bytes);
-        eprintln!(
+        debug_log!(
             "[smc_writer] unlock_fan_control: Ftst key found — type={type_str} size={}",
             key_info.data_size
         );
 
         // Read current Ftst value before writing
         match self.read_key_bytes(key, key_info.data_size) {
-            Ok(current) => eprintln!(
+            Ok(current) => debug_log!(
                 "[smc_writer] unlock_fan_control: Ftst current value={:?}",
                 current
             ),
-            Err(e) => eprintln!(
+            Err(e) => debug_log!(
                 "[smc_writer] unlock_fan_control: could not read Ftst current value: {e}"
             ),
         }
 
-        eprintln!("[smc_writer] unlock_fan_control: writing Ftst=1");
+        debug_log!("[smc_writer] unlock_fan_control: writing Ftst=1");
         let result = self.write_key_bytes(key, key_info.data_size, &[1]);
         match &result {
             Ok(()) => {
                 // Verify the write took effect
                 match self.read_key_bytes(key, key_info.data_size) {
-                    Ok(readback) => eprintln!(
+                    Ok(readback) => debug_log!(
                         "[smc_writer] unlock_fan_control: Ftst readback after write={:?}",
                         readback
                     ),
-                    Err(e) => eprintln!(
+                    Err(e) => debug_log!(
                         "[smc_writer] unlock_fan_control: Ftst readback failed: {e}"
                     ),
                 }
             }
-            Err(e) => eprintln!("[smc_writer] unlock_fan_control: write FAILED: {e}"),
+            Err(e) => debug_log!("[smc_writer] unlock_fan_control: write FAILED: {e}"),
         }
         result
     }
 
     /// Clears the `Ftst` flag, re-enabling thermal enforcement.
-    pub fn lock_fan_control(&self) -> Result<(), SmcWriteError> {
+    fn lock_fan_control_impl(&self) -> Result<(), SmcWriteError> {
         let key = u32::from_be_bytes(*b"Ftst");
         let key_info = self.read_key_info(key)?;
-        eprintln!("[smc_writer] lock_fan_control: writing Ftst=0");
+        debug_log!("[smc_writer] lock_fan_control: writing Ftst=0");
         self.write_key_bytes(key, key_info.data_size, &[0])
     }
 
@@ -382,14 +432,14 @@ impl SmcWriter {
     ///   1. Try `Ftst=1` unlock (M3/M4 need it; gracefully skipped if key absent)
     ///   2. Write `F{n}Md=1` (forced mode)
     ///   3. Write `F{n}Tg=<rpm>`
-    pub fn set_fan_target_rpm(
+    fn set_fan_target_rpm_impl(
         &self,
         fan_index: u8,
         rpm: f32,
         min_rpm: f32,
         max_rpm: f32,
     ) -> Result<(), SmcWriteError> {
-        eprintln!("[smc_writer] set_fan_target_rpm: fan={fan_index} rpm={rpm} bounds=[{min_rpm}, {max_rpm}]");
+        debug_log!("[smc_writer] set_fan_target_rpm: fan={fan_index} rpm={rpm} bounds=[{min_rpm}, {max_rpm}]");
         if rpm < min_rpm || rpm > max_rpm {
             return Err(SmcWriteError::InvalidRpm {
                 min: min_rpm,
@@ -399,20 +449,20 @@ impl SmcWriter {
         }
 
         // Step 1: Unlock thermal enforcement (best-effort — key may not exist on M1)
-        match self.unlock_fan_control() {
-            Ok(()) => eprintln!("[smc_writer] Ftst unlock OK"),
+        match self.unlock_fan_control_impl() {
+            Ok(()) => debug_log!("[smc_writer] Ftst unlock OK"),
             Err(SmcWriteError::UnknownKey(_)) => {
-                eprintln!("[smc_writer] Ftst key not present (M1) — skipping unlock");
+                debug_log!("[smc_writer] Ftst key not present (M1) — skipping unlock");
             }
             Err(e) => {
-                eprintln!("[smc_writer] Ftst unlock failed: {e} — continuing anyway");
+                debug_log!("[smc_writer] Ftst unlock failed: {e} — continuing anyway");
             }
         }
 
         self.wait_for_system_mode_handoff(fan_index)?;
 
         // Step 2: Set forced mode
-        eprintln!("[smc_writer] Setting F{fan_index}Md=1 (forced)");
+        debug_log!("[smc_writer] Setting F{fan_index}Md=1 (forced)");
         self.set_fan_mode(fan_index, true)?;
         self.verify_mode_allows_target_write(fan_index)?;
 
@@ -421,7 +471,7 @@ impl SmcWriter {
         let key_info = self.read_key_info(key)?;
         let type_bytes = key_info.data_type.to_be_bytes();
         let type_str = String::from_utf8_lossy(&type_bytes);
-        eprintln!(
+        debug_log!(
             "[smc_writer] F{fan_index}Tg type={type_str} size={}",
             key_info.data_size
         );
@@ -435,25 +485,25 @@ impl SmcWriter {
                 let readback_rpm = decode_rpm(&readback, &type_bytes);
                 let diff = (readback_rpm - rpm).abs();
                 if diff > 50.0 {
-                    eprintln!(
+                    debug_log!(
                         "[smc_writer] WARNING: F{fan_index}Tg write did not persist — wrote={rpm:.0} readback={readback_rpm:.0}"
                     );
                 } else {
-                    eprintln!("[smc_writer] F{fan_index}Tg verified: {readback_rpm:.0} RPM");
+                    debug_log!("[smc_writer] F{fan_index}Tg verified: {readback_rpm:.0} RPM");
                 }
             }
-            Err(e) => eprintln!("[smc_writer] F{fan_index}Tg readback failed: {e}"),
+            Err(e) => debug_log!("[smc_writer] F{fan_index}Tg readback failed: {e}"),
         }
 
-        eprintln!("[smc_writer] set_fan_target_rpm: done fan={fan_index} rpm={rpm}");
+        debug_log!("[smc_writer] set_fan_target_rpm: done fan={fan_index} rpm={rpm}");
         Ok(())
     }
 
     /// Returns fan to automatic (system-controlled) mode.
     /// Caller is responsible for calling `lock_fan_control()` when
     /// no fans remain in forced mode.
-    pub fn set_fan_auto(&self, fan_index: u8) -> Result<(), SmcWriteError> {
-        eprintln!("[smc_writer] set_fan_auto: fan={fan_index}");
+    fn set_fan_auto_impl(&self, fan_index: u8) -> Result<(), SmcWriteError> {
+        debug_log!("[smc_writer] set_fan_auto: fan={fan_index}");
         self.set_fan_mode(fan_index, false)
     }
 
@@ -470,10 +520,10 @@ impl SmcWriter {
     }
 
     fn wait_for_system_mode_handoff(&self, fan_index: u8) -> Result<(), SmcWriteError> {
-        eprintln!("[smc_writer] wait_for_system_mode_handoff: fan={fan_index} — polling mode (max {MODE_TRANSITION_RETRY_COUNT} x {}ms)...",
+        debug_log!("[smc_writer] wait_for_system_mode_handoff: fan={fan_index} — polling mode (max {MODE_TRANSITION_RETRY_COUNT} x {}ms)...",
             MODE_POLL_INTERVAL.as_millis());
         let initial_mode = self.read_fan_mode(fan_index)?;
-        eprintln!("[smc_writer] wait_for_system_mode_handoff: initial mode={initial_mode} (0=Auto, 1=Forced, 3=System)");
+        debug_log!("[smc_writer] wait_for_system_mode_handoff: initial mode={initial_mode} (0=Auto, 1=Forced, 3=System)");
 
         let mut poll_count: u32 = 0;
         let result = wait_for_system_mode_handoff(
@@ -481,7 +531,7 @@ impl SmcWriter {
                 let mode = self.read_fan_mode(fan_index)?;
                 poll_count += 1;
                 if poll_count <= 5 || poll_count % 20 == 0 {
-                    eprintln!("[smc_writer] wait_for_system_mode_handoff: poll #{poll_count} mode={mode}");
+                    debug_log!("[smc_writer] wait_for_system_mode_handoff: poll #{poll_count} mode={mode}");
                 }
                 Ok(mode)
             },
@@ -491,9 +541,9 @@ impl SmcWriter {
         match &result {
             Ok(()) => {
                 let final_mode = self.read_fan_mode(fan_index).unwrap_or(255);
-                eprintln!("[smc_writer] wait_for_system_mode_handoff: OK after {poll_count} polls, final mode={final_mode}");
+                debug_log!("[smc_writer] wait_for_system_mode_handoff: OK after {poll_count} polls, final mode={final_mode}");
             }
-            Err(e) => eprintln!("[smc_writer] wait_for_system_mode_handoff: FAILED after {poll_count} polls: {e}"),
+            Err(e) => debug_log!("[smc_writer] wait_for_system_mode_handoff: FAILED after {poll_count} polls: {e}"),
         }
         result
     }
@@ -510,7 +560,7 @@ impl SmcWriter {
 
     fn verify_mode_allows_target_write(&self, fan_index: u8) -> Result<(), SmcWriteError> {
         let actual_mode = self.read_fan_mode(fan_index)?;
-        eprintln!("[smc_writer] verify_mode: fan={fan_index} actual_mode={actual_mode} (need 0 or 1, reject 3)");
+        debug_log!("[smc_writer] verify_mode: fan={fan_index} actual_mode={actual_mode} (need 0 or 1, reject 3)");
         validate_mode_allows_target_write(actual_mode)
     }
 
@@ -518,9 +568,11 @@ impl SmcWriter {
 
     /// Reads key info (data type + size) for a given 4-char SMC key.
     fn read_key_info(&self, key: u32) -> Result<SmcKeyDataKeyInfo, SmcWriteError> {
-        let mut input = SmcKeyData::default();
-        input.key = key;
-        input.data8 = SMC_CMD_READ_KEYINFO;
+        let input = SmcKeyData {
+            key,
+            data8: SMC_CMD_READ_KEYINFO,
+            ..Default::default()
+        };
 
         let mut output = SmcKeyData::default();
         self.smc_call(&input, &mut output)?;
@@ -531,10 +583,12 @@ impl SmcWriter {
     /// Reads raw bytes from an SMC key.
     #[allow(dead_code)]
     fn read_key_bytes(&self, key: u32, data_size: u32) -> Result<Vec<u8>, SmcWriteError> {
-        let mut input = SmcKeyData::default();
-        input.key = key;
-        input.data8 = SMC_CMD_READ_BYTES;
-        input.key_info.data_size = data_size;
+        let input = SmcKeyData {
+            key,
+            data8: SMC_CMD_READ_BYTES,
+            key_info: SmcKeyDataKeyInfo { data_size, ..Default::default() },
+            ..Default::default()
+        };
 
         let mut output = SmcKeyData::default();
         self.smc_call(&input, &mut output)?;
@@ -545,10 +599,13 @@ impl SmcWriter {
 
     /// Writes raw bytes to an SMC key.
     fn write_key_bytes(&self, key: u32, data_size: u32, bytes: &[u8]) -> Result<(), SmcWriteError> {
-        let mut input = SmcKeyData::default();
-        input.key = key;
-        input.data8 = SMC_CMD_WRITE_BYTES;
-        input.key_info.data_size = data_size;
+        let input_base = SmcKeyData {
+            key,
+            data8: SMC_CMD_WRITE_BYTES,
+            key_info: SmcKeyDataKeyInfo { data_size, ..Default::default() },
+            ..Default::default()
+        };
+        let mut input = input_base;
 
         let len = (data_size as usize).min(bytes.len()).min(32);
         input.bytes.0[..len].copy_from_slice(&bytes[..len]);
@@ -566,7 +623,7 @@ impl SmcWriter {
             SMC_CMD_READ_BYTES => "READ_BYTES",
             SMC_CMD_WRITE_BYTES => "WRITE_BYTES",
             other => {
-                eprintln!("[smc_writer] smc_call: key={key_str} cmd=UNKNOWN({other})");
+                debug_log!("[smc_writer] smc_call: key={key_str} cmd=UNKNOWN({other})");
                 "UNKNOWN"
             }
         };
@@ -585,11 +642,11 @@ impl SmcWriter {
         };
 
         if result == RETURN_NOT_PRIVILEGED {
-            eprintln!("[smc_writer] smc_call: key={key_str} cmd={cmd_name} -> IOKit RETURN_NOT_PRIVILEGED ({result:#010x})");
+            warn_log!("[smc_writer] smc_call: key={key_str} cmd={cmd_name} -> IOKit RETURN_NOT_PRIVILEGED ({result:#010x})");
             return Err(SmcWriteError::InsufficientPrivileges);
         }
         if result != KERN_SUCCESS {
-            eprintln!("[smc_writer] smc_call: key={key_str} cmd={cmd_name} -> IOKit FAILED result={result:#010x} smc_result={}", output.result);
+            debug_log!("[smc_writer] smc_call: key={key_str} cmd={cmd_name} -> IOKit FAILED result={result:#010x} smc_result={}", output.result);
             return Err(SmcWriteError::CallFailed(result, output.result));
         }
 
@@ -599,7 +656,7 @@ impl SmcWriter {
                 // Only log writes at this level to avoid flooding
                 if input.data8 == SMC_CMD_WRITE_BYTES {
                     let data_len = input.key_info.data_size as usize;
-                    eprintln!(
+                    debug_log!(
                         "[smc_writer] smc_call: key={key_str} cmd={cmd_name} -> OK (wrote {} bytes: {:?})",
                         data_len,
                         &input.bytes.0[..data_len.min(8)]
@@ -608,15 +665,15 @@ impl SmcWriter {
                 Ok(())
             }
             132 => {
-                eprintln!("[smc_writer] smc_call: key={key_str} cmd={cmd_name} -> SMC result=132 (UNKNOWN KEY)");
+                debug_log!("[smc_writer] smc_call: key={key_str} cmd={cmd_name} -> SMC result=132 (UNKNOWN KEY)");
                 Err(SmcWriteError::UnknownKey(key_str.to_string()))
             }
             134 => {
-                eprintln!("[smc_writer] smc_call: key={key_str} cmd={cmd_name} -> SMC result=134 (INSUFFICIENT PRIVILEGES)");
+                debug_log!("[smc_writer] smc_call: key={key_str} cmd={cmd_name} -> SMC result=134 (INSUFFICIENT PRIVILEGES)");
                 Err(SmcWriteError::InsufficientPrivileges)
             }
             code => {
-                eprintln!("[smc_writer] smc_call: key={key_str} cmd={cmd_name} -> SMC result={code} (UNEXPECTED)");
+                debug_log!("[smc_writer] smc_call: key={key_str} cmd={cmd_name} -> SMC result={code} (UNEXPECTED)");
                 Err(SmcWriteError::CallFailed(result, code))
             }
         }
@@ -627,7 +684,7 @@ impl SmcWriter {
 
 /// Opens a new IOKit connection to AppleSMC.
 unsafe fn smc_open() -> Result<io_connect_t, SmcWriteError> {
-    let matching_dictionary = IOServiceMatching(b"AppleSMC\0".as_ptr());
+    let matching_dictionary = IOServiceMatching(c"AppleSMC".as_ptr().cast());
     let device = IOServiceGetMatchingService(MASTER_PORT_DEFAULT, matching_dictionary);
 
     if device == MACH_PORT_NULL {
@@ -642,7 +699,7 @@ unsafe fn smc_open() -> Result<io_connect_t, SmcWriteError> {
         return Err(SmcWriteError::OpenFailed(result));
     }
 
-    eprintln!("[smc_writer] smc_open: conn={conn}");
+    warn_log!("[smc_writer] smc_open: conn={conn}");
     Ok(conn)
 }
 
@@ -741,6 +798,105 @@ fn validate_mode_allows_target_write(actual_mode: u8) -> Result<(), SmcWriteErro
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
+
+// ── Test mock ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+pub mod mock {
+    use super::*;
+    use std::cell::RefCell;
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum MockSmcCall {
+        SetFanTargetRpm { fan_index: u8, rpm: f32 },
+        SetFanAuto { fan_index: u8 },
+        LockFanControl,
+        UnlockFanControl,
+        DiagnoseFanControl,
+    }
+
+    pub struct MockSmcWriter {
+        pub calls: RefCell<Vec<MockSmcCall>>,
+        pub should_fail: bool,
+    }
+
+    // Safety: MockSmcWriter is only used in single-threaded test contexts.
+    unsafe impl Send for MockSmcWriter {}
+    unsafe impl Sync for MockSmcWriter {}
+
+    impl MockSmcWriter {
+        pub fn new() -> Self {
+            Self {
+                calls: RefCell::new(Vec::new()),
+                should_fail: false,
+            }
+        }
+
+        pub fn failing() -> Self {
+            Self {
+                calls: RefCell::new(Vec::new()),
+                should_fail: true,
+            }
+        }
+    }
+
+    impl SmcWriteApi for MockSmcWriter {
+        fn set_fan_target_rpm(
+            &self,
+            fan_index: u8,
+            rpm: f32,
+            _min_rpm: f32,
+            _max_rpm: f32,
+        ) -> Result<(), SmcWriteError> {
+            self.calls
+                .borrow_mut()
+                .push(MockSmcCall::SetFanTargetRpm { fan_index, rpm });
+            if self.should_fail {
+                Err(SmcWriteError::InsufficientPrivileges)
+            } else {
+                Ok(())
+            }
+        }
+
+        fn set_fan_auto(&self, fan_index: u8) -> Result<(), SmcWriteError> {
+            self.calls
+                .borrow_mut()
+                .push(MockSmcCall::SetFanAuto { fan_index });
+            if self.should_fail {
+                Err(SmcWriteError::InsufficientPrivileges)
+            } else {
+                Ok(())
+            }
+        }
+
+        fn lock_fan_control(&self) -> Result<(), SmcWriteError> {
+            self.calls.borrow_mut().push(MockSmcCall::LockFanControl);
+            if self.should_fail {
+                Err(SmcWriteError::InsufficientPrivileges)
+            } else {
+                Ok(())
+            }
+        }
+
+        fn unlock_fan_control(&self) -> Result<(), SmcWriteError> {
+            self.calls
+                .borrow_mut()
+                .push(MockSmcCall::UnlockFanControl);
+            if self.should_fail {
+                Err(SmcWriteError::InsufficientPrivileges)
+            } else {
+                Ok(())
+            }
+        }
+
+        fn diagnose_fan_control(&self) -> Vec<String> {
+            self.calls
+                .borrow_mut()
+                .push(MockSmcCall::DiagnoseFanControl);
+            vec!["mock diagnostic".to_string()]
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

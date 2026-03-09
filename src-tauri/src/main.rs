@@ -1,6 +1,7 @@
 mod apple_silicon_sensors;
 mod commands;
 mod fan_control;
+mod log;
 mod presets;
 mod smc;
 mod smc_writer;
@@ -12,37 +13,38 @@ use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
 use commands::AppState;
+use log::{debug_log, warn_log};
 use smc::FanMode;
 
 fn bootstrap_menu_bar(app: &mut tauri::App) {
-    println!("[mac-fan-ctrl] Starting shell bootstrap");
+    debug_log!("[mac-fan-ctrl] Starting shell bootstrap");
 
     match tauri::menu::Menu::default(app.handle()) {
         Ok(menu) => match app.set_menu(menu) {
-            Ok(_) => println!("[mac-fan-ctrl] Menu bar bootstrapped successfully"),
+            Ok(_) => debug_log!("[mac-fan-ctrl] Menu bar bootstrapped successfully"),
             Err(error) => {
-                eprintln!(
+                debug_log!(
                     "[mac-fan-ctrl] Menu bar setup failed, continuing without custom menu: {error}"
                 );
             }
         },
         Err(error) => {
-            eprintln!(
+            debug_log!(
                 "[mac-fan-ctrl] Menu baseline not available, continuing with defaults: {error}"
             );
         }
     }
 
-    println!("[mac-fan-ctrl] Shell bootstrap complete");
+    debug_log!("[mac-fan-ctrl] Shell bootstrap complete");
 }
 
 fn run_fan_control_tick(app_handle: &tauri::AppHandle, sensor_data: &mut smc::SensorData) {
     let state = app_handle.state::<AppState>();
     if let Ok(writer_guard) = state.smc_writer.lock() {
-        if let Some(writer) = writer_guard.as_ref() {
+        if let Some(writer) = writer_guard.as_deref() {
             if let Ok(mut control) = state.fan_control.lock() {
                 if let Err(error) = control.tick(&sensor_data.details, &sensor_data.fans, writer) {
-                    eprintln!("[mac-fan-ctrl] Fan control tick failed: {error}");
+                    warn_log!("[mac-fan-ctrl] Fan control tick failed: {error}");
                 }
                 // Overlay configured target/mode onto raw SMC data so the
                 // frontend displays the user's settings, not stale readbacks.
@@ -56,22 +58,22 @@ fn run_startup_diagnostics(app_handle: &tauri::AppHandle) {
     let state = app_handle.state::<AppState>();
     let uid = unsafe { libc::getuid() };
     let euid = unsafe { libc::geteuid() };
-    eprintln!("\n[mac-fan-ctrl] === STARTUP DIAGNOSTICS ===");
-    eprintln!("[mac-fan-ctrl] UID={uid} EUID={euid} running_as_root={}", euid == 0);
+    debug_log!("\n[mac-fan-ctrl] === STARTUP DIAGNOSTICS ===");
+    debug_log!("[mac-fan-ctrl] UID={uid} EUID={euid} running_as_root={}", euid == 0);
 
     if let Ok(writer_guard) = state.smc_writer.lock() {
-        match writer_guard.as_ref() {
+        match writer_guard.as_deref() {
             Some(writer) => {
-                eprintln!("[mac-fan-ctrl] SMC Writer: AVAILABLE");
+                debug_log!("[mac-fan-ctrl] SMC Writer: AVAILABLE");
                 writer.diagnose_fan_control();
             }
             None => {
-                eprintln!("[mac-fan-ctrl] SMC Writer: NOT AVAILABLE — fan control will not work");
-                eprintln!("[mac-fan-ctrl] Likely cause: app not running as root (EUID={euid})");
+                debug_log!("[mac-fan-ctrl] SMC Writer: NOT AVAILABLE — fan control will not work");
+                debug_log!("[mac-fan-ctrl] Likely cause: app not running as root (EUID={euid})");
             }
         }
     }
-    eprintln!("[mac-fan-ctrl] === END STARTUP DIAGNOSTICS ===\n");
+    debug_log!("[mac-fan-ctrl] === END STARTUP DIAGNOSTICS ===\n");
 }
 
 fn restore_active_preset(app_handle: &tauri::AppHandle) {
@@ -88,14 +90,14 @@ fn restore_active_preset(app_handle: &tauri::AppHandle) {
         }
     };
 
-    eprintln!("[mac-fan-ctrl] Restoring saved preset: {preset_name}");
+    debug_log!("[mac-fan-ctrl] Restoring saved preset: {preset_name}");
 
     let writer_guard = match state.smc_writer.lock() {
         Ok(g) => g,
         Err(_) => return,
     };
-    let Some(writer) = writer_guard.as_ref() else {
-        eprintln!("[mac-fan-ctrl] Cannot restore preset — SMC writer not available");
+    let Some(writer) = writer_guard.as_deref() else {
+        debug_log!("[mac-fan-ctrl] Cannot restore preset — SMC writer not available");
         return;
     };
 
@@ -111,7 +113,7 @@ fn restore_active_preset(app_handle: &tauri::AppHandle) {
     };
     let all = presets::all_presets(&store, &fan_indices, &fan_maxes);
     let Some(preset) = all.iter().find(|p| p.name == preset_name) else {
-        eprintln!("[mac-fan-ctrl] Saved preset '{preset_name}' not found — skipping restore");
+        debug_log!("[mac-fan-ctrl] Saved preset '{preset_name}' not found — skipping restore");
         return;
     };
 
@@ -122,11 +124,11 @@ fn restore_active_preset(app_handle: &tauri::AppHandle) {
 
     for (fan_index, config) in &preset.configs {
         if let Err(error) = fan_control.set_config(*fan_index, config.clone(), &fans, writer) {
-            eprintln!("[mac-fan-ctrl] Failed to restore fan {fan_index}: {error}");
+            warn_log!("[mac-fan-ctrl] Failed to restore fan {fan_index}: {error}");
         }
     }
 
-    eprintln!("[mac-fan-ctrl] Preset '{preset_name}' restored successfully");
+    debug_log!("[mac-fan-ctrl] Preset '{preset_name}' restored successfully");
 }
 
 fn start_sensor_stream(app_handle: tauri::AppHandle) {
@@ -147,22 +149,22 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
                     Ok(mut sensor_data) => {
                         run_fan_control_tick(&app_handle, &mut sensor_data);
 
-                        eprintln!("[stream] cycle={cycle_count} emit(full)");
+                        debug_log!("[stream] cycle={cycle_count} emit(full)");
                         if let Err(error) =
                             app_handle.emit(commands::SENSOR_UPDATE_EVENT, &sensor_data)
                         {
-                            eprintln!("[mac-fan-ctrl] Failed to emit sensor_update event: {error}");
+                            warn_log!("[mac-fan-ctrl] Failed to emit sensor_update event: {error}");
                         }
 
                         // Full tray update: temperature title + menu rebuild
-                        eprintln!("[stream] cycle={cycle_count} update_tray_title+menu");
+                        debug_log!("[stream] cycle={cycle_count} update_tray_title+menu");
                         tray::update_tray_title(&app_handle, &sensor_data);
                         tray::update_tray_menu(&app_handle, &sensor_data);
 
                         last_full_data = Some(sensor_data);
                     }
                     Err(error) => {
-                        eprintln!("[mac-fan-ctrl] Sensor stream read failed: {error}");
+                        warn_log!("[mac-fan-ctrl] Sensor stream read failed: {error}");
                         service = smc::SensorService::new();
                     }
                 }
@@ -175,13 +177,13 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
 
                 run_fan_control_tick(&app_handle, cached);
 
-                eprintln!("[stream] cycle={cycle_count} emit(fast)");
+                debug_log!("[stream] cycle={cycle_count} emit(fast)");
                 if let Err(error) = app_handle.emit(commands::SENSOR_UPDATE_EVENT, &*cached) {
-                    eprintln!("[mac-fan-ctrl] Failed to emit sensor_update event: {error}");
+                    warn_log!("[mac-fan-ctrl] Failed to emit sensor_update event: {error}");
                 }
 
                 // Fast tray update: temperature title only
-                eprintln!("[stream] cycle={cycle_count} update_tray_title");
+                debug_log!("[stream] cycle={cycle_count} update_tray_title");
                 tray::update_tray_title(&app_handle, cached);
             }
 
@@ -200,13 +202,13 @@ fn restore_fans(app_handle: &tauri::AppHandle) {
     let Ok(writer_guard) = state.smc_writer.lock() else {
         return;
     };
-    let Some(writer) = writer_guard.as_ref() else {
+    let Some(writer) = writer_guard.as_deref() else {
         return;
     };
     let Ok(mut control) = state.fan_control.lock() else {
         return;
     };
-    eprintln!("[mac-fan-ctrl] Restoring all fans to Auto");
+    warn_log!("[mac-fan-ctrl] Restoring all fans to Auto");
     control.restore_all_auto(writer);
 }
 
@@ -223,7 +225,7 @@ fn recover_orphaned_fan_modes(app_handle: &tauri::AppHandle) {
     let Ok(writer_guard) = state.smc_writer.lock() else {
         return;
     };
-    let Some(writer) = writer_guard.as_ref() else {
+    let Some(writer) = writer_guard.as_deref() else {
         return;
     };
 
@@ -240,7 +242,7 @@ fn recover_orphaned_fan_modes(app_handle: &tauri::AppHandle) {
         return;
     }
 
-    eprintln!(
+    warn_log!(
         "[mac-fan-ctrl] RECOVERY: Found {} orphaned fan(s) in Forced mode: {:?}",
         orphaned.len(),
         orphaned
@@ -248,13 +250,13 @@ fn recover_orphaned_fan_modes(app_handle: &tauri::AppHandle) {
 
     for fan_index in &orphaned {
         match writer.set_fan_auto(*fan_index) {
-            Ok(()) => eprintln!("[mac-fan-ctrl] RECOVERY: Fan {fan_index} restored to Auto"),
-            Err(e) => eprintln!("[mac-fan-ctrl] RECOVERY: Failed to restore fan {fan_index}: {e}"),
+            Ok(()) => warn_log!("[mac-fan-ctrl] RECOVERY: Fan {fan_index} restored to Auto"),
+            Err(e) => warn_log!("[mac-fan-ctrl] RECOVERY: Failed to restore fan {fan_index}: {e}"),
         }
     }
 
     let _ = writer.lock_fan_control();
-    eprintln!("[mac-fan-ctrl] RECOVERY: Thermal enforcement re-locked");
+    warn_log!("[mac-fan-ctrl] RECOVERY: Thermal enforcement re-locked");
 }
 
 fn main() {
@@ -272,7 +274,7 @@ fn main() {
                     app.manage(commands::TrayHandle(tray_icon));
                 }
                 Err(e) => {
-                    eprintln!("[mac-fan-ctrl] Tray setup failed: {e}");
+                    warn_log!("[mac-fan-ctrl] Tray setup failed: {e}");
                 }
             }
 
@@ -290,11 +292,11 @@ fn main() {
             // Register signal handler for SIGTERM/SIGINT
             let signal_handle = app.handle().clone();
             ctrlc::set_handler(move || {
-                eprintln!("[mac-fan-ctrl] Signal received — restoring fans to Auto");
+                warn_log!("[mac-fan-ctrl] Signal received — restoring fans to Auto");
                 restore_fans(&signal_handle);
             })
             .unwrap_or_else(|e| {
-                eprintln!("[mac-fan-ctrl] Signal handler registration failed: {e}");
+                warn_log!("[mac-fan-ctrl] Signal handler registration failed: {e}");
             });
 
             start_sensor_stream(app.handle().clone());
@@ -315,6 +317,7 @@ fn main() {
             commands::get_privilege_status,
             commands::request_privilege_restart,
             commands::diagnose_fan_control,
+            commands::open_url,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {

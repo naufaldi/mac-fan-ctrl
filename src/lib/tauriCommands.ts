@@ -91,3 +91,9 @@ export async function getPrivilegeStatus(): Promise<PrivilegeStatus> {
 export async function requestPrivilegeRestart(): Promise<void> {
 	return invoke<void>("request_privilege_restart");
 }
+
+// ── URL commands ────────────────────────────────────────────────────────────
+
+export async function openUrl(url: string): Promise<void> {
+	return invoke<void>("open_url", { url });
+}
