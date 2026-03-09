@@ -1,9 +1,15 @@
 <script lang="ts">
-  import DesktopDashboard from './components/DesktopDashboard.svelte';
   import type { SensorData as DesignTokenSensor } from '$lib/designTokens';
   import type { FanData, SensorData } from '$lib/types';
   import { getSensors, listenToSensorUpdates } from '$lib/tauriCommands';
   import { cn } from "$lib/cn";
+  import type { Component } from 'svelte';
+
+  // Dynamic import prevents DesktopDashboard's import chain from blocking
+  // the loading skeleton. If any module in the chain throws at runtime,
+  // the skeleton and error states still render.
+  const dashboardPromise: Promise<Component<{ fans: DesignTokenSensor[]; sensorData: SensorData | null }>> =
+    import('./components/DesktopDashboard.svelte').then((m) => m.default);
 
   type AppStatus =
     | { readonly kind: 'loading' }
@@ -153,7 +159,16 @@
   </main>
 {:else}
   <!-- Ready state -->
-  <main class={cn("flex h-full w-full")}>
-    <DesktopDashboard {fans} {sensorData} />
-  </main>
+  {#await dashboardPromise then DashboardComponent}
+    <main class={cn("flex h-full w-full")}>
+      <DashboardComponent {fans} {sensorData} />
+    </main>
+  {:catch error}
+    <main class={cn("flex h-full w-full items-center justify-center bg-[#ececec] dark:bg-[#1e1e1e]")}>
+      <div class={cn("flex flex-col items-center gap-1")}>
+        <p class={cn("text-[12px] font-medium text-(--text-primary)")}>Failed to load dashboard</p>
+        <p class={cn("text-[11px] text-(--text-muted)")}>{error instanceof Error ? error.message : String(error)}</p>
+      </div>
+    </main>
+  {/await}
 {/if}

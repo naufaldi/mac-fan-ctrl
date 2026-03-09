@@ -18,13 +18,14 @@ Welcome to the learning resources for mac-fan-ctrl. This project is designed as 
 7. [macOS SMC](./macos-smc.md) - System Management Controller basics
 8. [Read Sensor Architecture](./read-sensor.md) - End-to-end sensor read flow and N/A behavior
 9. [M1 Pro Fan Control Investigation](./fan-control-m1-pro-investigation.md) - Real-world Apple Silicon write-vs-hardware mismatch analysis
-10. [System Programming Concepts](./system-programming.md) - Low-level macOS programming
-11. [Unsafe Rust](./unsafe-rust.md) - When and how to use unsafe code
+10. [macOS Menu Bar Tray Icons](./macos-tray.md) - Tray icon setup, live updates, menu architecture, and event handling
+11. [System Programming Concepts](./system-programming.md) - Low-level macOS programming
+12. [Unsafe Rust](./unsafe-rust.md) - When and how to use unsafe code
 
 ### Phase 4: Integration
-11. [Tauri Commands](./tauri-commands.md) - Frontend-Backend communication
-12. [Async Rust](./async-rust.md) - Concurrency with tokio
-13. [Testing Strategy](./testing.md) - Unit, integration, and E2E tests
+13. [Tauri Commands](./tauri-commands.md) - Frontend-Backend communication
+14. [Async Rust](./async-rust.md) - Concurrency with tokio
+15. [Testing Strategy](./testing.md) - Unit, integration, and E2E tests
 
 ## Quick Reference
 

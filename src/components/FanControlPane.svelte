@@ -2,8 +2,8 @@
   import { cn } from '$lib/cn';
   import { toFanRows } from '$lib/dashboardLayout';
   import type { SensorData } from '$lib/designTokens';
-  import type { FanData, Sensor } from '$lib/types';
-  import { setFanAuto, requestPrivilegeRestart } from '$lib/tauriCommands';
+  import type { FanControlConfig, FanData, Sensor } from '$lib/types';
+  import { getFanControlConfigs, setFanAuto, requestPrivilegeRestart } from '$lib/tauriCommands';
   import { Fan as FanIcon } from 'lucide-svelte';
   import FanControlModal from './FanControlModal.svelte';
 
@@ -27,13 +27,23 @@
   // ── Modal state ──────────────────────────────────────────────────────────
 
   let modalFan: FanData | null = $state(null);
+  let modalConfig: FanControlConfig | undefined = $state(undefined);
   let modalTriggerEl: HTMLButtonElement | null = $state(null);
   let privilegeError: string | null = $state(null);
+
+  let fanConfigs: Record<string, FanControlConfig> = $state({});
+
+  $effect(() => {
+    getFanControlConfigs()
+      .then((configs) => { fanConfigs = configs; })
+      .catch((err) => console.error('[mac-fan-ctrl] Failed to fetch fan configs:', err));
+  });
 
   function openCustomModal(fanIndex: number, triggerEl: HTMLButtonElement): void {
     const fan = rawFans.find((f) => f.index === fanIndex);
     if (fan) {
       modalFan = fan;
+      modalConfig = fanConfigs[String(fan.index)];
       modalTriggerEl = triggerEl;
     }
   }
@@ -166,5 +176,5 @@
 </section>
 
 {#if modalFan}
-  <FanControlModal fan={modalFan} {sensors} onclose={closeModal} />
+  <FanControlModal fan={modalFan} {sensors} currentConfig={modalConfig} onclose={closeModal} />
 {/if}
