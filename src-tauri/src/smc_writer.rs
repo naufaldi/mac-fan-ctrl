@@ -80,9 +80,9 @@ const SMC_CMD_READ_KEYINFO: u8 = 9;
 #[allow(dead_code)]
 const SMC_CMD_READ_BYTES: u8 = 5;
 const SMC_CMD_WRITE_BYTES: u8 = 6;
-const APPLE_SILICON_AUTO_MODE: u8 = 0;
-const APPLE_SILICON_MANUAL_MODE: u8 = 1;
-const APPLE_SILICON_SYSTEM_MODE: u8 = 3;
+const FAN_MODE_AUTO: u8 = 0;
+const FAN_MODE_MANUAL: u8 = 1;
+const FAN_MODE_SYSTEM: u8 = 3;
 const MODE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MODE_TRANSITION_RETRY_COUNT: u32 = 100;
 
@@ -247,6 +247,7 @@ impl SmcWriter {
         let mut lines: Vec<String> = Vec::new();
 
         lines.push("=== SMC Fan Control Diagnostic Report ===".to_string());
+        lines.push(format!("Architecture: {}", std::env::consts::ARCH));
         lines.push(format!("Connection handle: {}", self.conn));
 
         // Check Ftst key
@@ -262,7 +263,7 @@ impl SmcWriter {
                 }
             }
             Err(SmcWriteError::UnknownKey(_)) => {
-                lines.push("Ftst key: NOT FOUND — this M1 does not have diagnostic unlock key".to_string());
+                lines.push("Ftst key: NOT FOUND — this Mac does not have the diagnostic unlock key".to_string());
                 lines.push("  -> Direct F*Md writes may work (pre-14.4 firmware) or may be blocked".to_string());
             }
             Err(e) => lines.push(format!("Ftst key check error: {e}")),
@@ -421,11 +422,20 @@ impl SmcWriter {
     }
 
     /// Clears the `Ftst` flag, re-enabling thermal enforcement.
+    /// Returns `Ok(())` if the key doesn't exist (Intel / M1 / M2 lack it).
     fn lock_fan_control_impl(&self) -> Result<(), SmcWriteError> {
         let key = u32::from_be_bytes(*b"Ftst");
-        let key_info = self.read_key_info(key)?;
-        debug_log!("[smc_writer] lock_fan_control: writing Ftst=0");
-        self.write_key_bytes(key, key_info.data_size, &[0])
+        match self.read_key_info(key) {
+            Ok(key_info) => {
+                debug_log!("[smc_writer] lock_fan_control: writing Ftst=0");
+                self.write_key_bytes(key, key_info.data_size, &[0])
+            }
+            Err(SmcWriteError::UnknownKey(_)) => {
+                debug_log!("[smc_writer] lock_fan_control: Ftst key absent — no lock needed");
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
     }
 
     // ── Fan control helpers ──────────────────────────────────────────────
@@ -516,9 +526,9 @@ impl SmcWriter {
         let key = fan_key(fan_index, b"Md");
         let key_info = self.read_key_info(key)?;
         let value: u8 = if forced {
-            APPLE_SILICON_MANUAL_MODE
+            FAN_MODE_MANUAL
         } else {
-            APPLE_SILICON_AUTO_MODE
+            FAN_MODE_AUTO
         };
         self.write_key_bytes(key, key_info.data_size, &[value])
     }
@@ -778,14 +788,14 @@ where
     FSleep: FnMut(Duration),
 {
     for _attempt in 0..MODE_TRANSITION_RETRY_COUNT {
-        if read_mode()? != APPLE_SILICON_SYSTEM_MODE {
+        if read_mode()? != FAN_MODE_SYSTEM {
             return Ok(());
         }
 
         sleep_fn(MODE_POLL_INTERVAL);
     }
 
-    if read_mode()? == APPLE_SILICON_SYSTEM_MODE {
+    if read_mode()? == FAN_MODE_SYSTEM {
         return Err(SmcWriteError::ModeTransitionTimedOut);
     }
 
@@ -794,7 +804,7 @@ where
 
 fn validate_mode_allows_target_write(actual_mode: u8) -> Result<(), SmcWriteError> {
     match actual_mode {
-        APPLE_SILICON_AUTO_MODE | APPLE_SILICON_MANUAL_MODE => Ok(()),
+        FAN_MODE_AUTO | FAN_MODE_MANUAL => Ok(()),
         _ => Err(SmcWriteError::ModeVerificationFailed {
             actual: actual_mode,
         }),
@@ -962,7 +972,7 @@ mod tests {
         let mut observed_sleeps: Vec<Duration> = Vec::new();
 
         let result = wait_for_system_mode_handoff(
-            || Ok(APPLE_SILICON_SYSTEM_MODE),
+            || Ok(FAN_MODE_SYSTEM),
             |duration| observed_sleeps.push(duration),
         );
 
@@ -975,26 +985,26 @@ mod tests {
 
     #[test]
     fn validate_mode_allows_target_write_accepts_auto_readback() {
-        let result = validate_mode_allows_target_write(APPLE_SILICON_AUTO_MODE);
+        let result = validate_mode_allows_target_write(FAN_MODE_AUTO);
 
         assert!(result.is_ok());
     }
 
     #[test]
     fn validate_mode_allows_target_write_accepts_manual_readback() {
-        let result = validate_mode_allows_target_write(APPLE_SILICON_MANUAL_MODE);
+        let result = validate_mode_allows_target_write(FAN_MODE_MANUAL);
 
         assert!(result.is_ok());
     }
 
     #[test]
     fn validate_mode_allows_target_write_rejects_system_mode() {
-        let result = validate_mode_allows_target_write(APPLE_SILICON_SYSTEM_MODE);
+        let result = validate_mode_allows_target_write(FAN_MODE_SYSTEM);
 
         assert!(matches!(
             result,
             Err(SmcWriteError::ModeVerificationFailed {
-                actual: APPLE_SILICON_SYSTEM_MODE,
+                actual: FAN_MODE_SYSTEM,
             })
         ));
     }
