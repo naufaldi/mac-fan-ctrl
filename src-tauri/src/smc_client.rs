@@ -18,6 +18,10 @@ impl SmcSocketClient {
         let socket_path = PathBuf::from(path);
         let stream = UnixStream::connect(&socket_path)
             .map_err(|_| SmcWriteError::HelperNotRunning)?;
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
+        stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))
+            .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
         let response = send_request_on(&stream, &HelperRequest::Ping)?;
         match response {
             HelperResponse::Pong => Ok(Self { socket_path }),
@@ -39,6 +43,10 @@ fn send_request_on(
     stream: &UnixStream,
     request: &HelperRequest,
 ) -> Result<HelperResponse, SmcWriteError> {
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))
+        .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
     let mut writer = stream.try_clone()
         .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
     let mut line = serde_json::to_string(request)

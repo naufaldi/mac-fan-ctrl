@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,7 +39,8 @@ fn main() {
         }
     };
 
-    if let Err(e) = fs::set_permissions(SOCKET_PATH, fs::Permissions::from_mode(0o666)) {
+    // Restrict socket to owner (root) and group (staff) only — no world access
+    if let Err(e) = fs::set_permissions(SOCKET_PATH, fs::Permissions::from_mode(0o660)) {
         eprintln!("[mac-fan-ctrl-helper] Failed to set socket permissions: {e}");
     }
 
@@ -85,7 +86,9 @@ fn main() {
 }
 
 fn handle_client(stream: UnixStream, writer: &Mutex<SmcWriter>) -> std::io::Result<()> {
-    let mut reader = BufReader::new(&stream);
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap_or(());
+    let limited = (&stream).take(8192);
+    let mut reader = BufReader::new(limited);
     let mut line = String::new();
     reader.read_line(&mut line)?;
 
