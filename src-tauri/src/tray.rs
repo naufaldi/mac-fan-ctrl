@@ -363,6 +363,10 @@ fn handle_tray_icon_event(tray: &TrayIcon, event: TrayIconEvent) {
 // ── Action helpers ──────────────────────────────────────────────────────────
 
 fn show_main_window(app: &AppHandle) {
+    // Restore Dock + Cmd+Tab presence before showing
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();

@@ -438,16 +438,10 @@ fn main() {
                 }
             }
 
-            // Hide Dock icon — app lives in the menu bar
+            // Start with Regular policy so the app appears in Cmd+Tab.
+            // Switch to Accessory when the user hides to menu bar.
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-
-            // Bring window to front after Accessory policy change
-            // (macOS deactivates the app when removing its dock icon)
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
 
             // Register signal handler for SIGTERM/SIGINT
             let signal_handle = app.handle().clone();
@@ -484,6 +478,7 @@ fn main() {
             commands::get_power_preset_config,
             commands::set_power_preset_config,
             commands::get_current_power_source,
+            commands::hide_to_menu_bar,
             commands::install_helper,
             commands::reconnect_writer,
         ])
@@ -492,6 +487,9 @@ fn main() {
                 // Hide to tray instead of closing
                 api.prevent_close();
                 let _ = window.hide();
+                // Remove from Dock + Cmd+Tab when hidden
+                #[cfg(target_os = "macos")]
+                let _ = window.app_handle().set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
             tauri::WindowEvent::Destroyed => {
                 restore_fans(window.app_handle());

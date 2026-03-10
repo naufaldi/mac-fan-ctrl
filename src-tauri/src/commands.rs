@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::alerts::{self, AlertConfig};
 use crate::fan_control::{FanControlConfig, FanControlState};
@@ -81,6 +81,18 @@ pub fn get_app_info(app_handle: tauri::AppHandle) -> Result<AppInfo, String> {
         version: config.version.clone().unwrap_or_else(|| "0.0.0".to_string()),
         identifier: config.identifier.clone(),
     })
+}
+
+// ── Window management ────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn hide_to_menu_bar(app_handle: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    #[cfg(target_os = "macos")]
+    let _ = app_handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    Ok(())
 }
 
 // ── Existing commands ────────────────────────────────────────────────────────

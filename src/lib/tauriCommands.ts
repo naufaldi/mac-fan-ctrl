@@ -158,6 +158,10 @@ export async function requestPrivilegeRestart(): Promise<void> {
 	return invoke<void>("request_privilege_restart");
 }
 
+export async function hideToMenuBar(): Promise<void> {
+	return invoke<void>("hide_to_menu_bar");
+}
+
 export async function installHelper(): Promise<string> {
 	return invoke<string>("install_helper");
 }

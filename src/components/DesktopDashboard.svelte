@@ -4,6 +4,7 @@ import { cn } from "$lib/cn";
 import type { SensorData as DesignTokenSensor } from "$lib/designTokens";
 import {
 	getPrivilegeStatus,
+	hideToMenuBar,
 	installHelper,
 	listenCheckForUpdates,
 	listenShowAbout,
@@ -94,7 +95,7 @@ $effect(() => {
 
 async function handleHideToMenuBar(): Promise<void> {
 	try {
-		await getCurrentWindow().hide();
+		await hideToMenuBar();
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
 		console.error("[DesktopDashboard] Failed to hide window:", msg);
