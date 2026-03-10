@@ -43,6 +43,9 @@ jobs:
             target/x86_64-apple-darwin/release/fanguard-helper \
             -output target/universal-apple-darwin/release/fanguard-helper
 
+      - name: Strip quarantine attribute from helper binary
+        run: xattr -cr src-tauri/target/universal-apple-darwin/release/fanguard-helper 2>/dev/null || true
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:

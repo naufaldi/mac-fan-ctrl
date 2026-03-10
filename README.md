@@ -24,6 +24,17 @@ A native macOS fan control utility built with Tauri v2 (Rust backend) and Svelte
 
 Download the latest `.dmg` from [Releases](https://github.com/naufaldi/mac-fan-ctrl/releases).
 
+> **Note:** FanGuard is not yet notarized with Apple. macOS will show a warning on first launch. To open the app:
+>
+> **Option A** — Right-click the app → click **Open** → click **Open** in the dialog.
+>
+> **Option B** — Run in Terminal after installing:
+> ```bash
+> xattr -cr /Applications/FanGuard.app
+> ```
+>
+> **Option C** — Go to **System Settings → Privacy & Security** → click **Open Anyway**.
+
 ### Homebrew
 
 ```bash
