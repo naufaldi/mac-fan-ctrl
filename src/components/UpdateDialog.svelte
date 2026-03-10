@@ -40,7 +40,7 @@ function handleKeydown(event: KeyboardEvent): void {
 }
 
 const buttonBase =
-	"cursor-pointer rounded-[5px] border px-4 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
+	"rounded-[5px] border px-4 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
