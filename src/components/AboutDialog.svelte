@@ -19,7 +19,7 @@ $effect(() => {
 			appInfo = info;
 		})
 		.catch(() => {
-			appInfo = { name: "Mac Fan Control", version: "unknown", identifier: "" };
+			appInfo = { name: "FanGuard", version: "unknown", identifier: "" };
 		});
 });
 
@@ -27,7 +27,7 @@ $effect(() => {
 	closeButtonEl?.focus();
 });
 
-const GITHUB_REPO_URL = "https://github.com/nicholasgriffintn/mac-fan-ctrl";
+const GITHUB_REPO_URL = "https://github.com/naufaldi/mac-fan-ctrl";
 
 async function handleGitHub(): Promise<void> {
 	try {
@@ -86,7 +86,7 @@ const buttonBase =
     )}
     role="dialog"
     aria-modal="true"
-    aria-label="About Mac Fan Control"
+    aria-label="About FanGuard"
     transition:scale={{ duration: 150, start: 0.95, opacity: 0 }}
   >
     <div class={cn('flex flex-col items-center px-6 pt-6 pb-2')}>
@@ -105,7 +105,7 @@ const buttonBase =
       </div>
 
       <h2 class={cn('text-[14px] font-semibold text-(--text-primary)')}>
-        {appInfo?.name ?? "Mac Fan Control"}
+        {appInfo?.name ?? "FanGuard"}
       </h2>
 
       <p class={cn('mt-1 text-[12px] font-mono text-(--text-secondary) [font-variant-numeric:tabular-nums]')}>

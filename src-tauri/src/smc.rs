@@ -454,7 +454,7 @@ impl SmcClient {
         let fan_iter = match self.smc.fans() {
             Ok(iter) => iter,
             Err(error) => {
-                warn_log!("[mac-fan-ctrl] Failed reading fans: {error}");
+                warn_log!("[fanguard] Failed reading fans: {error}");
                 return Vec::new();
             }
         };
@@ -465,7 +465,7 @@ impl SmcClient {
                 let fan_speed = match result {
                     Ok(speed) => speed,
                     Err(error) => {
-                        warn_log!("[mac-fan-ctrl] Failed reading fan {position}: {error}");
+                        warn_log!("[fanguard] Failed reading fan {position}: {error}");
                         return None;
                     }
                 };
@@ -499,7 +499,7 @@ impl SmcClient {
         let all_data = match self.smc.all_data() {
             Ok(data) => data,
             Err(error) => {
-                warn_log!("[mac-fan-ctrl] Failed reading dynamic SMC keys: {error}");
+                warn_log!("[fanguard] Failed reading dynamic SMC keys: {error}");
                 return Vec::new();
             }
         };
@@ -543,7 +543,7 @@ impl SmcClient {
             .flatten()
             .collect::<Vec<_>>(),
             Err(error) => {
-                warn_log!("[mac-fan-ctrl] Failed reading CPU temperatures: {error}");
+                warn_log!("[fanguard] Failed reading CPU temperatures: {error}");
                 Vec::new()
             }
         }
@@ -584,7 +584,7 @@ impl SmcClient {
                     .collect::<Vec<_>>()
             }
             Err(error) => {
-                warn_log!("[mac-fan-ctrl] Failed reading CPU core temperatures: {error}");
+                warn_log!("[fanguard] Failed reading CPU core temperatures: {error}");
                 Vec::new()
             }
         }
@@ -620,7 +620,7 @@ impl SmcClient {
                 average.into_iter().chain(clusters).collect::<Vec<_>>()
             }
             Err(error) => {
-                warn_log!("[mac-fan-ctrl] Failed reading GPU temperatures: {error}");
+                warn_log!("[fanguard] Failed reading GPU temperatures: {error}");
                 Vec::new()
             }
         }
@@ -667,7 +667,7 @@ impl SmcClient {
             .flatten()
             .collect::<Vec<_>>(),
             Err(error) => {
-                warn_log!("[mac-fan-ctrl] Failed reading other temperatures: {error}");
+                warn_log!("[fanguard] Failed reading other temperatures: {error}");
                 Vec::new()
             }
         }
@@ -692,7 +692,7 @@ impl SmcClient {
                     .collect::<Vec<_>>()
             }
             Err(error) => {
-                warn_log!("[mac-fan-ctrl] Failed reading battery temperatures: {error}");
+                warn_log!("[fanguard] Failed reading battery temperatures: {error}");
                 Vec::new()
             }
         }
@@ -710,7 +710,7 @@ impl SmcClient {
             .flatten()
             .collect::<Vec<_>>(),
             Err(error) => {
-                warn_log!("[mac-fan-ctrl] Failed reading CPU power sensors: {error}");
+                warn_log!("[fanguard] Failed reading CPU power sensors: {error}");
                 Vec::new()
             }
         };
@@ -1006,7 +1006,7 @@ impl SensorService {
 
         if self.diagnostics_enabled && !diagnostics.unresolved.is_empty() {
             warn_log!(
-                "[mac-fan-ctrl] unresolved sensors: {}",
+                "[fanguard] unresolved sensors: {}",
                 diagnostics.unresolved.len()
             );
         }

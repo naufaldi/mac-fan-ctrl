@@ -933,6 +933,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "fanguard"
+version = "0.1.0-beta.1"
+dependencies = [
+ "core-foundation",
+ "ctrlc",
+ "dirs 5.0.1",
+ "libc",
+ "macsmc",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-notification",
+ "tauri-plugin-updater",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2006,25 +2025,6 @@ name = "mac"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
-
-[[package]]
-name = "mac-fan-ctrl"
-version = "0.1.0"
-dependencies = [
- "core-foundation",
- "ctrlc",
- "dirs 5.0.1",
- "libc",
- "macsmc",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-notification",
- "tauri-plugin-updater",
- "tempfile",
- "thiserror 1.0.69",
-]
 
 [[package]]
 name = "mac-notification-sys"

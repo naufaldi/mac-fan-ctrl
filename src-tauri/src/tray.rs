@@ -72,7 +72,7 @@ pub fn setup_tray(app: &mut tauri::App) -> Result<TrayIcon, tauri::Error> {
         .icon(icon)
         .icon_as_template(true)
         .title("--°C")
-        .tooltip("Mac Fan Control")
+        .tooltip("FanGuard Beta")
         .menu(&initial_menu)
         .show_menu_on_left_click(true)
         .on_menu_event(handle_menu_event)
@@ -81,12 +81,12 @@ pub fn setup_tray(app: &mut tauri::App) -> Result<TrayIcon, tauri::Error> {
 }
 
 fn build_initial_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
-    let show_item = MenuItem::with_id(app, SHOW_WINDOW, "Show Mac Fan Control", true, None::<&str>)?;
+    let show_item = MenuItem::with_id(app, SHOW_WINDOW, "Show FanGuard", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
-    let about_item = MenuItem::with_id(app, ABOUT, "About Mac Fan Control", true, None::<&str>)?;
+    let about_item = MenuItem::with_id(app, ABOUT, "About FanGuard", true, None::<&str>)?;
     let update_item = MenuItem::with_id(app, CHECK_FOR_UPDATES, "Check for Updates...", true, None::<&str>)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
-    let quit_item = MenuItem::with_id(app, QUIT, "Quit Mac Fan Control", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, QUIT, "Quit FanGuard", true, None::<&str>)?;
 
     MenuBuilder::new(app)
         .item(&show_item)
@@ -107,7 +107,7 @@ fn build_tray_menu(
     all_presets: &[presets::Preset],
     power_source: PowerSource,
 ) -> Result<Menu<tauri::Wry>, tauri::Error> {
-    let show_item = MenuItem::with_id(app, SHOW_WINDOW, "Show Mac Fan Control", true, None::<&str>)?;
+    let show_item = MenuItem::with_id(app, SHOW_WINDOW, "Show FanGuard", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
 
     // Power source indicator
@@ -142,10 +142,10 @@ fn build_tray_menu(
         .collect();
 
     let sep3 = PredefinedMenuItem::separator(app)?;
-    let about_item = MenuItem::with_id(app, ABOUT, "About Mac Fan Control", true, None::<&str>)?;
+    let about_item = MenuItem::with_id(app, ABOUT, "About FanGuard", true, None::<&str>)?;
     let update_item = MenuItem::with_id(app, CHECK_FOR_UPDATES, "Check for Updates...", true, None::<&str>)?;
     let sep4 = PredefinedMenuItem::separator(app)?;
-    let quit_item = MenuItem::with_id(app, QUIT, "Quit Mac Fan Control", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, QUIT, "Quit FanGuard", true, None::<&str>)?;
 
     // Assemble the menu
     let mut builder = MenuBuilder::new(app)

@@ -52,7 +52,7 @@ $effect(() => {
 			if (!cancelled) applyUpdate(initial);
 		} catch (e) {
 			const message = e instanceof Error ? e.message : String(e);
-			console.error("[mac-fan-ctrl] Failed to fetch initial sensors:", e);
+			console.error("[fanguard] Failed to fetch initial sensors:", e);
 			if (!cancelled) appStatus = { kind: "error", message };
 		}
 
@@ -65,7 +65,7 @@ $effect(() => {
 				unlisten = null;
 			}
 		} catch (e) {
-			console.error("[mac-fan-ctrl] Failed to subscribe:", e);
+			console.error("[fanguard] Failed to subscribe:", e);
 		}
 	};
 

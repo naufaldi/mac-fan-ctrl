@@ -9,6 +9,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::fs_util::fix_ownership_if_root;
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,7 +35,7 @@ impl Default for AlertConfig {
 fn config_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("~/.config"))
-        .join("mac-fan-ctrl")
+        .join("fanguard")
 }
 
 fn alerts_file() -> PathBuf {
@@ -50,10 +52,14 @@ pub fn load_alert_config() -> AlertConfig {
 
 pub fn save_alert_config(config: &AlertConfig) -> Result<(), String> {
     let dir = config_dir();
+    let path = alerts_file();
     fs::create_dir_all(&dir).map_err(|e| format!("Failed to create config dir: {e}"))?;
     let json =
         serde_json::to_string_pretty(config).map_err(|e| format!("Failed to serialize: {e}"))?;
-    fs::write(alerts_file(), json).map_err(|e| format!("Failed to write alerts config: {e}"))
+    fs::write(&path, &json).map_err(|e| format!("Failed to write alerts config: {e}"))?;
+    fix_ownership_if_root(&dir);
+    fix_ownership_if_root(&path);
+    Ok(())
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

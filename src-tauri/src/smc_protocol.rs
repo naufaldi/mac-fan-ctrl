@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const SOCKET_PATH: &str = "/var/run/mac-fan-ctrl.sock";
+pub const SOCKET_PATH: &str = "/var/run/fanguard.sock";
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]

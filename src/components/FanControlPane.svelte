@@ -43,7 +43,7 @@ $effect(() => {
 			fanConfigs = configs;
 		})
 		.catch((err) =>
-			console.error("[mac-fan-ctrl] Failed to fetch fan configs:", err),
+			console.error("[fanguard] Failed to fetch fan configs:", err),
 		);
 });
 
@@ -80,7 +80,7 @@ async function handleAutoClick(fanIndex: number): Promise<void> {
 		if (isPrivilegeError(error)) {
 			privilegeError = "Fan control requires elevated privileges.";
 		} else {
-			console.error("[mac-fan-ctrl] Failed to set fan to auto:", error);
+			console.error("[fanguard] Failed to set fan to auto:", error);
 		}
 	}
 }
@@ -99,7 +99,7 @@ async function handleRestartWithPrivileges(): Promise<void> {
 		} else if (isDevModeError(msg)) {
 			privilegeError = msg;
 		} else {
-			console.error("[mac-fan-ctrl] Privilege restart failed:", error);
+			console.error("[fanguard] Privilege restart failed:", error);
 		}
 	}
 }

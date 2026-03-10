@@ -1,4 +1,4 @@
-# mac-fan-ctrl PNPM Workspace Configuration
+# FanGuard PNPM Workspace Configuration
 # This project uses pnpm workspaces to manage the frontend and Tauri backend
 
 packages:

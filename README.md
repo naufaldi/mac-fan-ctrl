@@ -1,6 +1,8 @@
-# Mac Fan Control
+# FanGuard
 
 A native macOS fan control utility built with Tauri v2 (Rust backend) and Svelte 5 (frontend). Monitor temperatures and manage fan speeds through Apple's System Management Controller (SMC).
+
+> **Beta** — This app is in active development. Please report issues on [GitHub](https://github.com/naufaldi/mac-fan-ctrl/issues).
 
 ## Features
 
@@ -18,7 +20,16 @@ A native macOS fan control utility built with Tauri v2 (Rust backend) and Svelte
 
 ## Installation
 
+### Direct Download
+
 Download the latest `.dmg` from [Releases](https://github.com/naufaldi/mac-fan-ctrl/releases).
+
+### Homebrew
+
+```bash
+brew tap naufaldi/tap
+brew install --cask fanguard
+```
 
 ## Development
 

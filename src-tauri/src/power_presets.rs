@@ -8,6 +8,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::fs_util::fix_ownership_if_root;
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,7 +34,7 @@ impl Default for PowerPresetConfig {
 fn config_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("~/.config"))
-        .join("mac-fan-ctrl")
+        .join("fanguard")
 }
 
 fn config_file() -> PathBuf {
@@ -49,11 +51,15 @@ pub fn load_power_preset_config() -> PowerPresetConfig {
 
 pub fn save_power_preset_config(config: &PowerPresetConfig) -> Result<(), String> {
     let dir = config_dir();
+    let path = config_file();
     fs::create_dir_all(&dir).map_err(|e| format!("Failed to create config dir: {e}"))?;
     let json =
         serde_json::to_string_pretty(config).map_err(|e| format!("Failed to serialize: {e}"))?;
-    fs::write(config_file(), json)
-        .map_err(|e| format!("Failed to write power preset config: {e}"))
+    fs::write(&path, &json)
+        .map_err(|e| format!("Failed to write power preset config: {e}"))?;
+    fix_ownership_if_root(&dir);
+    fix_ownership_if_root(&path);
+    Ok(())
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

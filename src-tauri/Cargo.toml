@@ -1,12 +1,12 @@
 [package]
-name = "mac-fan-ctrl"
-version = "0.1.0"
-description = "macOS fan control utility — monitor temperatures and manage fan speeds via SMC"
-authors = ["mac-fan-ctrl contributors"]
+name = "fanguard"
+version = "0.1.0-beta.1"
+description = "FanGuard — macOS fan control utility: monitor temperatures and manage fan speeds via SMC"
+authors = ["naufaldi"]
 license = "MIT"
 edition = "2021"
 rust-version = "1.77.2"
-default-run = "mac-fan-ctrl"
+default-run = "fanguard"
 
 [build-dependencies]
 tauri-build = { version = "2.5.5", features = [] }
@@ -28,12 +28,12 @@ core-foundation = "0.10"
 tempfile = "3"
 
 [lib]
-name = "mac_fan_ctrl_lib"
+name = "fanguard_lib"
 path = "src/lib.rs"
 
 [[bin]]
-name = "mac-fan-ctrl-helper"
-path = "src/bin/mac-fan-ctrl-helper.rs"
+name = "fanguard-helper"
+path = "src/bin/fanguard-helper.rs"
 
 [profile.release]
 opt-level = 3

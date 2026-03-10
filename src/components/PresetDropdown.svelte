@@ -31,7 +31,7 @@ async function refreshPresets(): Promise<void> {
 		presets = loadedPresets;
 		activePresetName = activeName ?? "Automatic";
 	} catch (error) {
-		console.error("[mac-fan-ctrl] Failed to load presets:", error);
+		console.error("[fanguard] Failed to load presets:", error);
 	}
 }
 
@@ -63,7 +63,7 @@ async function handleApplyPreset(name: string): Promise<void> {
 		closeDropdown();
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
-		console.error("[mac-fan-ctrl] Failed to apply preset:", error);
+		console.error("[fanguard] Failed to apply preset:", error);
 		applyError = `Failed to apply preset '${name}': ${msg}`;
 	}
 }
@@ -91,7 +91,7 @@ async function handleSavePreset(): Promise<void> {
 			const existingName = msg.slice("duplicate:".length);
 			saveError = `This configuration already exists as '${existingName}'`;
 		} else {
-			console.error("[mac-fan-ctrl] Failed to save preset:", error);
+			console.error("[fanguard] Failed to save preset:", error);
 			saveError = "Failed to save preset";
 		}
 	}
@@ -109,7 +109,7 @@ async function handleDeletePreset(
 		void refreshPresets();
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
-		console.error("[mac-fan-ctrl] Failed to delete preset:", error);
+		console.error("[fanguard] Failed to delete preset:", error);
 		deleteError = `Failed to delete preset '${name}': ${msg}`;
 	}
 }

@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn connect_fails_when_no_socket() {
-        let result = SmcSocketClient::with_path("/tmp/nonexistent-mac-fan-ctrl-test.sock");
+        let result = SmcSocketClient::with_path("/tmp/nonexistent-fanguard-test.sock");
         assert!(result.is_err());
     }
 }

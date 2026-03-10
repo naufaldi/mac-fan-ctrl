@@ -16,10 +16,10 @@ use crate::smc_writer::{SmcWriteApi, SmcWriter};
 
 pub const SENSOR_UPDATE_EVENT: &str = "sensor_update";
 
-const HELPER_SOCKET: &str = "/var/run/mac-fan-ctrl.sock";
+const HELPER_SOCKET: &str = "/var/run/fanguard.sock";
 const HELPER_INSTALL_DIR: &str = "/Library/PrivilegedHelperTools";
 const LAUNCHDAEMON_DIR: &str = "/Library/LaunchDaemons";
-const DAEMON_LABEL: &str = "io.github.naufaldi.mac-fan-ctrl.helper";
+const DAEMON_LABEL: &str = "io.github.naufaldi.fanguard.helper";
 
 // ── Tray handle wrapper ─────────────────────────────────────────────────────
 
@@ -42,13 +42,13 @@ impl AppState {
             .map(|w| Box::new(w) as Box<dyn SmcWriteApi>)
             .or_else(|direct_err| {
                 warn_log!(
-                    "[mac-fan-ctrl] Direct SMC writer failed: {direct_err} — trying socket client"
+                    "[fanguard] Direct SMC writer failed: {direct_err} — trying socket client"
                 );
                 SmcSocketClient::new()
                     .map(|c| Box::new(c) as Box<dyn SmcWriteApi>)
             })
             .map_err(|e| {
-                warn_log!("[mac-fan-ctrl] Socket client also failed (fan control disabled): {e}");
+                warn_log!("[fanguard] Socket client also failed (fan control disabled): {e}");
                 e
             })
             .ok();
@@ -77,7 +77,7 @@ pub struct AppInfo {
 pub fn get_app_info(app_handle: tauri::AppHandle) -> Result<AppInfo, String> {
     let config = app_handle.config();
     Ok(AppInfo {
-        name: config.product_name.clone().unwrap_or_else(|| "Mac Fan Control".to_string()),
+        name: config.product_name.clone().unwrap_or_else(|| "FanGuard".to_string()),
         version: config.version.clone().unwrap_or_else(|| "0.0.0".to_string()),
         identifier: config.identifier.clone(),
     })
@@ -625,7 +625,7 @@ fn find_helper_binary(exe_path: &std::path::Path) -> Result<std::path::PathBuf, 
     let app_bundle_helper = exe_path
         .parent()
         .and_then(|p| p.parent())
-        .map(|p| p.join("MacOS/mac-fan-ctrl-helper"));
+        .map(|p| p.join("MacOS/fanguard-helper"));
 
     if let Some(ref path) = app_bundle_helper {
         if path.exists() {
@@ -635,12 +635,12 @@ fn find_helper_binary(exe_path: &std::path::Path) -> Result<std::path::PathBuf, 
 
     // Dev mode: look in same directory as the binary (target/debug or target/release)
     let target_dir = exe_path.parent().unwrap_or(exe_path);
-    let debug_helper = target_dir.join("mac-fan-ctrl-helper");
+    let debug_helper = target_dir.join("fanguard-helper");
     if debug_helper.exists() {
         return Ok(debug_helper);
     }
 
-    Err("Helper binary not found. Build it with: cargo build --bin mac-fan-ctrl-helper".to_string())
+    Err("Helper binary not found. Build it with: cargo build --bin fanguard-helper".to_string())
 }
 
 #[tauri::command]
