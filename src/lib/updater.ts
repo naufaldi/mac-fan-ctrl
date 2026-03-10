@@ -41,7 +41,14 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
 			},
 		};
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		return { status: "error", message };
+		const raw = error instanceof Error ? error.message : String(error);
+		const isNoRelease =
+			raw.includes("Could not fetch") ||
+			raw.includes("404") ||
+			raw.includes("PLACEHOLDER");
+		const message = isNoRelease
+			? "No updates available yet. This is a development build."
+			: raw;
+		return { status: isNoRelease ? "up-to-date" : "error", message };
 	}
 }
