@@ -41,6 +41,10 @@ pub enum SmcWriteError {
     ModeTransitionTimedOut,
     #[error("Fan mode verification failed: mode {actual} still blocks target writes")]
     ModeVerificationFailed { actual: u8 },
+    #[error("Privileged helper is not running")]
+    HelperNotRunning,
+    #[error("Helper communication error: {0}")]
+    HelperError(String),
 }
 
 // ── Low-level IOKit FFI types ────────────────────────────────────────────────

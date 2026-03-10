@@ -7,6 +7,7 @@ mod power_monitor;
 mod power_presets;
 mod presets;
 mod smc;
+mod smc_client;
 mod smc_protocol;
 mod smc_writer;
 mod tray;
