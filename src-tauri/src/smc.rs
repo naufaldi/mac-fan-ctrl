@@ -190,6 +190,7 @@ enum CpuTopologySource {
     PerfLevelSysctl,
     ModelHint,
     Heuristic,
+    IntelUniform,
     Unknown,
 }
 
@@ -265,6 +266,14 @@ fn resolve_cpu_topology(
             total_cores,
             efficiency_cores: 0,
             source: CpuTopologySource::Unknown,
+        };
+    }
+
+    if cfg!(target_arch = "x86_64") {
+        return CpuTopology {
+            total_cores,
+            efficiency_cores: 0,
+            source: CpuTopologySource::IntelUniform,
         };
     }
 
@@ -439,7 +448,11 @@ impl SmcClient {
 
         let dynamic = self.read_dynamic_temperature_keys();
         let fans = self.read_fans();
-        let derived = derive_apple_silicon_catalog_rows(&dynamic);
+        let derived = if should_use_apple_silicon_provider() {
+            derive_apple_silicon_catalog_rows(&dynamic)
+        } else {
+            Vec::new()
+        };
 
         let sensors = [baseline, dynamic, derived]
             .into_iter()
@@ -459,7 +472,11 @@ impl SmcClient {
             }
         };
 
-        fan_iter
+        let fan_data: Vec<_> = fan_iter.collect();
+        let total_fans = fan_data.len();
+
+        fan_data
+            .into_iter()
             .enumerate()
             .filter_map(|(position, result)| {
                 let fan_speed = match result {
@@ -470,11 +487,7 @@ impl SmcClient {
                     }
                 };
 
-                let label = match position {
-                    0 => "Left Fan".to_string(),
-                    1 => "Right Fan".to_string(),
-                    _ => format!("Fan {}", position + 1),
-                };
+                let label = label_fan(self.model_id.as_deref(), position, total_fans);
 
                 let mode = match fan_speed.mode {
                     macsmc::FanMode::Forced => FanMode::Forced,
@@ -760,12 +773,66 @@ fn data_value_to_f64(value: DataValue) -> Option<f64> {
     }
 }
 
+fn label_fan(model_id: Option<&str>, index: usize, total_fans: usize) -> String {
+    if total_fans == 1 {
+        return "System Fan".to_string();
+    }
+
+    let is_mac_pro = model_id
+        .map(|m| m.starts_with("MacPro"))
+        .unwrap_or(false);
+
+    if is_mac_pro {
+        return match index {
+            0 => "Intake Fan".to_string(),
+            1 => "Exhaust Fan".to_string(),
+            _ => format!("Fan {}", index + 1),
+        };
+    }
+
+    match index {
+        0 => "Left Fan".to_string(),
+        1 => "Right Fan".to_string(),
+        _ => format!("Fan {}", index + 1),
+    }
+}
+
+fn lookup_well_known_sensor_key(key: &str) -> Option<(&'static str, &'static str)> {
+    match key.to_uppercase().as_str() {
+        "TC0P" => Some(("CPU Proximity", "Cpu")),
+        "TC0H" => Some(("CPU Heatsink", "Cpu")),
+        "TC0D" => Some(("CPU Die", "Cpu")),
+        "TCXC" => Some(("CPU PECI", "Cpu")),
+        "TCSA" => Some(("CPU System Agent", "Cpu")),
+        "TCGC" => Some(("CPU Graphics", "Cpu")),
+        "TG0D" => Some(("GPU Die", "Gpu")),
+        "TG0P" => Some(("GPU Proximity", "Gpu")),
+        "TH0P" => Some(("HDD Proximity", "Storage")),
+        "THSP" => Some(("Thunderbolt Proximity", "Other")),
+        "TS0S" | "TM0S" => Some(("Memory Proximity", "Memory")),
+        "TM0P" => Some(("Memory Slot Proximity", "Memory")),
+        "TALC" | "TA0L" => Some(("Airflow Left", "Other")),
+        "TARC" | "TA0R" => Some(("Airflow Right", "Other")),
+        "TA0P" => Some(("Ambient", "Other")),
+        "TW0P" => Some(("Airport Proximity", "Other")),
+        "TB0T" => Some(("Battery TS 0", "Battery")),
+        "TB1T" => Some(("Battery TS 1", "Battery")),
+        "TB2T" => Some(("Battery TS 2", "Battery")),
+        "TPCD" => Some(("Power Manager Die", "Power")),
+        _ => None,
+    }
+}
+
 fn classify_dynamic_temperature_key(key: &str) -> (String, &'static str) {
+    if let Some((label, sensor_type)) = lookup_well_known_sensor_key(key) {
+        return (label.to_string(), sensor_type);
+    }
+
     let normalized = key.to_uppercase();
     if normalized.starts_with("TG") || normalized.ends_with('G') {
         return (format!("Dynamic GPU {key}"), "Gpu");
     }
-    if normalized.starts_with("TB") || normalized.starts_with("TG0") {
+    if normalized.starts_with("TB") {
         return (format!("Dynamic Battery {key}"), "Battery");
     }
     if normalized.starts_with("TM") {
@@ -1023,7 +1090,8 @@ impl SensorService {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_summary, derive_apple_silicon_catalog_rows, has_measured_per_core_cpu_temperature,
+        build_summary, classify_dynamic_temperature_key, derive_apple_silicon_catalog_rows,
+        has_measured_per_core_cpu_temperature, label_fan, lookup_well_known_sensor_key,
         resolve_cpu_topology, sort_sensors_for_display, CpuTopologySource, NullReason, Sensor,
         SensorSource, SmcClient, SummarySensors,
     };
@@ -1322,5 +1390,62 @@ mod tests {
             has_cpu_average || has_gpu_cluster,
             "expected dynamic Apple Silicon mapping to provide CPU/GPU values"
         );
+    }
+
+    // ── Intel support tests ──────────────────────────────────────────────
+
+    #[test]
+    fn label_fan_single_fan_is_system_fan() {
+        assert_eq!(label_fan(Some("Macmini8,1"), 0, 1), "System Fan");
+        assert_eq!(label_fan(Some("iMac20,1"), 0, 1), "System Fan");
+        assert_eq!(label_fan(Some("MacBookAir10,1"), 0, 1), "System Fan");
+    }
+
+    #[test]
+    fn label_fan_dual_fan_laptop_is_left_right() {
+        assert_eq!(label_fan(Some("MacBookPro16,1"), 0, 2), "Left Fan");
+        assert_eq!(label_fan(Some("MacBookPro16,1"), 1, 2), "Right Fan");
+    }
+
+    #[test]
+    fn label_fan_mac_pro_is_intake_exhaust() {
+        assert_eq!(label_fan(Some("MacPro7,1"), 0, 2), "Intake Fan");
+        assert_eq!(label_fan(Some("MacPro7,1"), 1, 2), "Exhaust Fan");
+        assert_eq!(label_fan(Some("MacPro7,1"), 2, 3), "Fan 3");
+    }
+
+    #[test]
+    fn label_fan_unknown_model_uses_defaults() {
+        assert_eq!(label_fan(None, 0, 2), "Left Fan");
+        assert_eq!(label_fan(None, 1, 2), "Right Fan");
+        assert_eq!(label_fan(None, 0, 1), "System Fan");
+    }
+
+    #[test]
+    fn lookup_well_known_intel_sensor_keys() {
+        assert_eq!(lookup_well_known_sensor_key("TC0P"), Some(("CPU Proximity", "Cpu")));
+        assert_eq!(lookup_well_known_sensor_key("TG0D"), Some(("GPU Die", "Gpu")));
+        assert_eq!(lookup_well_known_sensor_key("TH0P"), Some(("HDD Proximity", "Storage")));
+        assert_eq!(lookup_well_known_sensor_key("TA0P"), Some(("Ambient", "Other")));
+        assert_eq!(lookup_well_known_sensor_key("TB0T"), Some(("Battery TS 0", "Battery")));
+        assert_eq!(lookup_well_known_sensor_key("ZZZZ"), None);
+    }
+
+    #[test]
+    fn classify_dynamic_key_prefers_well_known_lookup() {
+        let (name, sensor_type) = classify_dynamic_temperature_key("TC0P");
+        assert_eq!(name, "CPU Proximity");
+        assert_eq!(sensor_type, "Cpu");
+
+        let (name, sensor_type) = classify_dynamic_temperature_key("TH0P");
+        assert_eq!(name, "HDD Proximity");
+        assert_eq!(sensor_type, "Storage");
+    }
+
+    #[test]
+    fn classify_dynamic_key_falls_back_for_unknown() {
+        let (name, sensor_type) = classify_dynamic_temperature_key("TXYZ");
+        assert_eq!(name, "Dynamic Sensor TXYZ");
+        assert_eq!(sensor_type, "Other");
     }
 }
