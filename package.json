@@ -3,6 +3,26 @@
 	"version": "0.1.0-beta.1",
 	"private": true,
 	"description": "FanGuard — macOS fan control application built with Tauri v2 and Svelte 5",
+	"author": "naufaldi",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/naufaldi/mac-fan-ctrl.git"
+	},
+	"homepage": "https://github.com/naufaldi/mac-fan-ctrl",
+	"bugs": {
+		"url": "https://github.com/naufaldi/mac-fan-ctrl/issues"
+	},
+	"keywords": [
+		"macos",
+		"fan-control",
+		"smc",
+		"tauri",
+		"temperature-monitor",
+		"apple-silicon",
+		"rust",
+		"svelte"
+	],
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
