@@ -2022,6 +2022,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-notification",
  "tauri-plugin-updater",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 

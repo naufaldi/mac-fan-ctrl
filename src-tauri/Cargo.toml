@@ -26,5 +26,13 @@ core-foundation = "0.10"
 [dev-dependencies]
 tempfile = "3"
 
+[lib]
+name = "mac_fan_ctrl_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mac-fan-ctrl-helper"
+path = "src/bin/mac-fan-ctrl-helper.rs"
+
 [profile.release]
 opt-level = 3
