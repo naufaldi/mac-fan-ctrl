@@ -34,7 +34,7 @@
 			"endpoints": [
 				"https://github.com/naufaldi/mac-fan-ctrl/releases/latest/download/latest.json"
 			],
-			"pubkey": "PLACEHOLDER_KEY_GENERATE_WITH_TAURI_SIGNER"
+			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYyNjRCRURFMzdGODEyNkIKUldSckV2ZzMzcjVrWXJralRwSk9PaWVCQ2ZadHJMM1J2NzhuTEFCcGRqdE9uL0t1Z0grNjJtbUEK"
 		}
 	}
 }
