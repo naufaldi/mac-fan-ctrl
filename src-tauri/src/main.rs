@@ -109,7 +109,7 @@ fn restore_active_preset(app_handle: &tauri::AppHandle) {
     };
 
     let mut service = smc::SensorService::new();
-    let fans = service.read_fans_only();
+    let fans = service.read_fans_only().unwrap_or_default();
     let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
     let fan_maxes: std::collections::HashMap<u8, f32> =
         fans.iter().map(|f| (f.index, f.max)).collect();
@@ -211,7 +211,7 @@ pub fn apply_preset_by_name(app_handle: &tauri::AppHandle, preset_name: &str) {
     };
 
     let mut service = smc::SensorService::new();
-    let fans = service.read_fans_only();
+    let fans = service.read_fans_only().unwrap_or_default();
     let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
     let fan_maxes: std::collections::HashMap<u8, f32> =
         fans.iter().map(|f| (f.index, f.max)).collect();
@@ -329,7 +329,7 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
                 }
             } else if let Some(ref mut cached) = last_full_data {
                 // Fast path: only re-read fan data (~10 key reads, <50ms)
-                let fresh_fans = service.read_fans_only();
+                let fresh_fans = service.read_fans_only().unwrap_or_default();
                 if !fresh_fans.is_empty() {
                     cached.fans = fresh_fans;
                 }
@@ -389,7 +389,7 @@ fn recover_orphaned_fan_modes(app_handle: &tauri::AppHandle) {
     };
 
     let mut service = smc::SensorService::new();
-    let fans = service.read_fans_only();
+    let fans = service.read_fans_only().unwrap_or_default();
 
     let orphaned: Vec<u8> = fans
         .iter()

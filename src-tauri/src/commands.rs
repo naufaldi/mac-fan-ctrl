@@ -229,7 +229,7 @@ pub fn get_presets(state: State<'_, AppState>) -> Result<Vec<Preset>, String> {
 
     // Only need fan metadata (indices + max RPM) — skip expensive temperature/ioreg reads
     let mut service = SensorService::new();
-    let fans = service.read_fans_only();
+    let fans = service.read_fans_only().map_err(|e| e.to_string())?;
 
     let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
     let fan_maxes: HashMap<u8, f32> = fans.iter().map(|f| (f.index, f.max)).collect();
@@ -252,7 +252,11 @@ pub fn apply_preset(state: State<'_, AppState>, name: String) -> Result<(), Stri
 
     // Only need fan metadata — skip expensive temperature/ioreg reads
     let mut service = SensorService::new();
-    let fans = service.read_fans_only();
+    let fans = service.read_fans_only().map_err(|e| e.to_string())?;
+
+    if fans.is_empty() {
+        return Err("No fans detected — cannot apply preset".to_string());
+    }
 
     let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
     let fan_maxes: HashMap<u8, f32> = fans.iter().map(|f| (f.index, f.max)).collect();
@@ -267,8 +271,10 @@ pub fn apply_preset(state: State<'_, AppState>, name: String) -> Result<(), Stri
 
     let mut fan_control = state.fan_control.lock().map_err(|e| e.to_string())?;
 
-    // First restore all fans to auto
-    fan_control.restore_all_auto(writer);
+    // Only restore fans to auto if there are active overrides (avoids unnecessary Ftst toggle)
+    if !fan_control.configs().is_empty() {
+        fan_control.restore_all_auto(writer);
+    }
 
     // Then apply preset configs
     for (fan_index, config) in &preset.configs {
@@ -290,7 +296,7 @@ pub fn save_preset(state: State<'_, AppState>, name: String) -> Result<(), Strin
 
     // Only need fan metadata for duplicate detection — skip expensive temperature/ioreg reads
     let mut service = SensorService::new();
-    let fans = service.read_fans_only();
+    let fans = service.read_fans_only().map_err(|e| e.to_string())?;
     let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
     let fan_maxes: HashMap<u8, f32> = fans.iter().map(|f| (f.index, f.max)).collect();
 

@@ -429,7 +429,7 @@ fn set_fan_rpm_from_tray(app: &AppHandle, fan_index: u8, rpm: f32) {
         };
 
         let mut service = SensorService::new();
-        let fans = service.read_fans_only();
+        let fans = service.read_fans_only().unwrap_or_default();
 
         let config = FanControlConfig::ConstantRpm { target_rpm: rpm };
         let mut control = match state.fan_control.lock() {

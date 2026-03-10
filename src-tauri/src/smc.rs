@@ -1031,17 +1031,19 @@ impl SensorService {
     }
 
     /// Fast path: read only fan data without the slow all_data() scan.
-    pub fn read_fans_only(&mut self) -> Vec<FanData> {
+    pub fn read_fans_only(&mut self) -> Result<Vec<FanData>, SmcError> {
         if self.smc_client.is_none() {
             self.smc_client =
                 SmcClient::new_with_context(self.model_id.clone(), self.perf_level_core_counts)
                     .ok();
         }
 
-        self.smc_client
-            .as_mut()
-            .map(SmcClient::read_fans)
-            .unwrap_or_default()
+        match self.smc_client.as_mut() {
+            Some(client) => Ok(client.read_fans()),
+            None => Err(SmcError::ConnectionFailed(
+                "SMC client unavailable".to_string(),
+            )),
+        }
     }
 
     pub fn read_all_sensors(&mut self) -> Result<SensorData, SmcError> {
