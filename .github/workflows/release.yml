@@ -32,6 +32,17 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      - name: Build helper binary (universal)
+        run: |
+          cd src-tauri
+          cargo build --release --bin fanguard-helper --target aarch64-apple-darwin
+          cargo build --release --bin fanguard-helper --target x86_64-apple-darwin
+          mkdir -p target/universal-apple-darwin/release
+          lipo -create \
+            target/aarch64-apple-darwin/release/fanguard-helper \
+            target/x86_64-apple-darwin/release/fanguard-helper \
+            -output target/universal-apple-darwin/release/fanguard-helper
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
