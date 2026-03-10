@@ -11,6 +11,7 @@ use crate::power_monitor::PowerSource;
 use crate::power_presets::{self, PowerPresetConfig};
 use crate::presets::{self, Preset, PresetStore};
 use crate::smc::SensorService;
+use crate::smc_client::SmcSocketClient;
 use crate::smc_writer::{SmcWriteApi, SmcWriter};
 
 pub const SENSOR_UPDATE_EVENT: &str = "sensor_update";
@@ -33,12 +34,19 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         let writer: Option<Box<dyn SmcWriteApi>> = SmcWriter::new()
+            .map(|w| Box::new(w) as Box<dyn SmcWriteApi>)
+            .or_else(|direct_err| {
+                warn_log!(
+                    "[mac-fan-ctrl] Direct SMC writer failed: {direct_err} — trying socket client"
+                );
+                SmcSocketClient::new()
+                    .map(|c| Box::new(c) as Box<dyn SmcWriteApi>)
+            })
             .map_err(|e| {
-                warn_log!("[mac-fan-ctrl] SMC writer init failed (fan control disabled): {e}");
+                warn_log!("[mac-fan-ctrl] Socket client also failed (fan control disabled): {e}");
                 e
             })
-            .ok()
-            .map(|w| Box::new(w) as Box<dyn SmcWriteApi>);
+            .ok();
 
         Self {
             fan_control: Mutex::new(FanControlState::new()),
