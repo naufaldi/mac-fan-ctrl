@@ -16,6 +16,11 @@ use crate::smc_writer::{SmcWriteApi, SmcWriter};
 
 pub const SENSOR_UPDATE_EVENT: &str = "sensor_update";
 
+const HELPER_SOCKET: &str = "/var/run/mac-fan-ctrl.sock";
+const HELPER_INSTALL_DIR: &str = "/Library/PrivilegedHelperTools";
+const LAUNCHDAEMON_DIR: &str = "/Library/LaunchDaemons";
+const DAEMON_LABEL: &str = "io.github.naufaldi.mac-fan-ctrl.helper";
+
 // ── Tray handle wrapper ─────────────────────────────────────────────────────
 
 pub struct TrayHandle(pub tauri::tray::TrayIcon);
@@ -528,6 +533,110 @@ pub fn set_power_preset_config(
 pub fn get_current_power_source(state: State<'_, AppState>) -> Result<PowerSource, String> {
     let source = state.current_power_source.lock().map_err(|e| e.to_string())?;
     Ok(*source)
+}
+
+// ── Helper installation commands ─────────────────────────────────────────────
+
+#[tauri::command]
+pub fn install_helper() -> Result<String, String> {
+    let exe_path = std::env::current_exe()
+        .map_err(|e| format!("Failed to get exe path: {e}"))?;
+
+    let helper_binary = find_helper_binary(&exe_path)?;
+
+    let install_path = format!("{HELPER_INSTALL_DIR}/{DAEMON_LABEL}");
+    let plist_path = format!("{LAUNCHDAEMON_DIR}/{DAEMON_LABEL}.plist");
+
+    let plist_content = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{DAEMON_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{install_path}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardErrorPath</key>
+    <string>/tmp/{DAEMON_LABEL}.log</string>
+</dict>
+</plist>"#
+    );
+
+    // Build shell commands for osascript
+    let shell_commands = format!(
+        "mkdir -p '{}' && cp '{}' '{}' && chmod 755 '{}' && chown root:wheel '{}' && /bin/cat > '{}' << 'PLISTEOF'\n{}\nPLISTEOF\nchown root:wheel '{}' && chmod 644 '{}' && launchctl bootout system/{} 2>/dev/null; launchctl bootstrap system '{}'",
+        HELPER_INSTALL_DIR,
+        helper_binary.to_string_lossy(), install_path, install_path, install_path,
+        plist_path, plist_content,
+        plist_path, plist_path,
+        DAEMON_LABEL, plist_path
+    );
+
+    let script = format!(
+        "do shell script {:?} with administrator privileges",
+        shell_commands
+    );
+
+    let result = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to launch osascript: {e}"))?;
+
+    if !result.status.success() {
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        if stderr.contains("User canceled") || stderr.contains("-128") {
+            return Err("User cancelled the authorization request".to_string());
+        }
+        return Err(format!("Installation failed: {stderr}"));
+    }
+
+    // Wait for socket to appear
+    for _ in 0..20 {
+        if std::path::Path::new(HELPER_SOCKET).exists() {
+            return Ok("Helper installed and running".to_string());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+
+    Err("Helper installed but socket not found after 5 seconds".to_string())
+}
+
+fn find_helper_binary(exe_path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    // Production: look in the .app bundle
+    let app_bundle_helper = exe_path
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.join("MacOS/mac-fan-ctrl-helper"));
+
+    if let Some(ref path) = app_bundle_helper {
+        if path.exists() {
+            return Ok(path.clone());
+        }
+    }
+
+    // Dev mode: look in same directory as the binary (target/debug or target/release)
+    let target_dir = exe_path.parent().unwrap_or(exe_path);
+    let debug_helper = target_dir.join("mac-fan-ctrl-helper");
+    if debug_helper.exists() {
+        return Ok(debug_helper);
+    }
+
+    Err("Helper binary not found. Build it with: cargo build --bin mac-fan-ctrl-helper".to_string())
+}
+
+#[tauri::command]
+pub fn reconnect_writer(state: State<'_, AppState>) -> Result<bool, String> {
+    let client = SmcSocketClient::new().map_err(|e| e.to_string())?;
+    let mut writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
+    *writer_guard = Some(Box::new(client));
+    Ok(true)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

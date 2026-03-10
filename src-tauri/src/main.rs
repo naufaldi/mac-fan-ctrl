@@ -484,6 +484,8 @@ fn main() {
             commands::get_power_preset_config,
             commands::set_power_preset_config,
             commands::get_current_power_source,
+            commands::install_helper,
+            commands::reconnect_writer,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {

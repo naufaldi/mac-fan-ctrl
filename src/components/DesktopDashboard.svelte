@@ -3,7 +3,7 @@ import { cn } from "$lib/cn";
 import type { SensorData as DesignTokenSensor } from "$lib/designTokens";
 import type { SensorData } from "$lib/types";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getPrivilegeStatus, listenShowAbout, listenCheckForUpdates, requestPrivilegeRestart } from "$lib/tauriCommands";
+import { getPrivilegeStatus, listenShowAbout, listenCheckForUpdates, installHelper, reconnectWriter } from "$lib/tauriCommands";
 import AboutDialog from "./AboutDialog.svelte";
 import PreferencesDialog from "./PreferencesDialog.svelte";
 import UpdateDialog from "./UpdateDialog.svelte";
@@ -36,7 +36,9 @@ const isDevMode = $derived(
 
 async function handleGrantAccess(): Promise<void> {
 	try {
-		await requestPrivilegeRestart();
+		await installHelper();
+		await reconnectWriter();
+		hasWriteAccess = true;
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
 		if (!msg.includes('cancelled') && !msg.includes('canceled')) {

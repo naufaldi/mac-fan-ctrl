@@ -158,6 +158,14 @@ export async function requestPrivilegeRestart(): Promise<void> {
 	return invoke<void>("request_privilege_restart");
 }
 
+export async function installHelper(): Promise<string> {
+	return invoke<string>("install_helper");
+}
+
+export async function reconnectWriter(): Promise<boolean> {
+	return invoke<boolean>("reconnect_writer");
+}
+
 // ── URL commands ────────────────────────────────────────────────────────────
 
 export async function openUrl(url: string): Promise<void> {
