@@ -23,13 +23,19 @@ const tempSensors = $derived(getFanControlSensors(sensors));
 type ControlMode = "constant_rpm" | "sensor_based";
 
 let selectedMode: ControlMode = $state(
-	untrack(() => currentConfig?.mode === "sensor_based" ? "sensor_based" : "constant_rpm")
+	untrack(() =>
+		currentConfig?.mode === "sensor_based"
+			? "sensor_based"
+			: "constant_rpm"
+	)
 );
 let constantRpm: number = $state(
 	untrack(() =>
 		currentConfig?.mode === "constant_rpm"
 			? currentConfig.target_rpm
-			: Math.round(fan.min + (fan.max - fan.min) / 2)
+			: fan.mode === "forced"
+				? Math.round(fan.target)
+				: Math.round(fan.min + (fan.max - fan.min) / 2)
 	)
 );
 let selectedSensorKey: string = $state(

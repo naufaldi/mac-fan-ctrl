@@ -1,6 +1,6 @@
 import type { Sensor, SensorData, SensorType } from "./types";
 
-export const SUMMARY_SENSOR_LIMIT = 4;
+export const SUMMARY_SENSOR_LIMIT = 15;
 
 type CatalogRow = {
 	key: string;
