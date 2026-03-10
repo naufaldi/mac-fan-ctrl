@@ -28,7 +28,6 @@
 		}
 	},
 	"plugins": {
-		"notification": {},
 		"updater": {
 			"endpoints": [
 				"https://github.com/naufaldi/mac-fan-ctrl/releases/latest/download/latest.json"
