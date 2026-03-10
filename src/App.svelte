@@ -1,81 +1,85 @@
 <script lang="ts">
-  import type { SensorData as DesignTokenSensor } from '$lib/designTokens';
-  import type { FanData, SensorData } from '$lib/types';
-  import { getSensors, listenToSensorUpdates } from '$lib/tauriCommands';
-  import { cn } from "$lib/cn";
-  import type { Component } from 'svelte';
+import type { Component } from "svelte";
+import { cn } from "$lib/cn";
+import type { SensorData as DesignTokenSensor } from "$lib/designTokens";
+import { getSensors, listenToSensorUpdates } from "$lib/tauriCommands";
+import type { FanData, SensorData } from "$lib/types";
 
-  // Dynamic import prevents DesktopDashboard's import chain from blocking
-  // the loading skeleton. If any module in the chain throws at runtime,
-  // the skeleton and error states still render.
-  const dashboardPromise: Promise<Component<{ fans: DesignTokenSensor[]; sensorData: SensorData | null }>> =
-    import('./components/DesktopDashboard.svelte').then((m) => m.default);
+// Dynamic import prevents DesktopDashboard's import chain from blocking
+// the loading skeleton. If any module in the chain throws at runtime,
+// the skeleton and error states still render.
+const dashboardPromise: Promise<
+	Component<{ fans: DesignTokenSensor[]; sensorData: SensorData | null }>
+> = import("./components/DesktopDashboard.svelte").then((m) => m.default);
 
-  type AppStatus =
-    | { readonly kind: 'loading' }
-    | { readonly kind: 'error'; readonly message: string }
-    | { readonly kind: 'ready' };
+type AppStatus =
+	| { readonly kind: "loading" }
+	| { readonly kind: "error"; readonly message: string }
+	| { readonly kind: "ready" };
 
-  let appStatus: AppStatus = $state({ kind: 'loading' });
-  let sensorData: SensorData | null = $state(null);
-  let fans: DesignTokenSensor[] = $state([]);
-  let unlisten: (() => void) | null = null;
+let appStatus: AppStatus = $state({ kind: "loading" });
+let sensorData: SensorData | null = $state(null);
+let fans: DesignTokenSensor[] = $state([]);
+let unlisten: (() => void) | null = null;
 
-  function toDesignToken(fan: FanData): DesignTokenSensor {
-    return {
-      id: `fan-${fan.index}`,
-      fanIndex: fan.index,
-      label: fan.label,
-      value: Math.round(fan.actual),
-      unit: 'rpm',
-      status: 'normal',
-      minRpm: Math.round(fan.min),
-      maxRpm: Math.round(fan.max),
-      targetRpm: Math.round(fan.target),
-      controlMode: fan.mode === 'forced' ? 'constant' : 'auto',
-    };
-  }
+function toDesignToken(fan: FanData): DesignTokenSensor {
+	return {
+		id: `fan-${fan.index}`,
+		fanIndex: fan.index,
+		label: fan.label,
+		value: Math.round(fan.actual),
+		unit: "rpm",
+		status: "normal",
+		minRpm: Math.round(fan.min),
+		maxRpm: Math.round(fan.max),
+		targetRpm: Math.round(fan.target),
+		controlMode: fan.mode === "forced" ? "constant" : "auto",
+	};
+}
 
-  function applyUpdate(data: SensorData): void {
-    sensorData = data;
-    fans = data.fans.map(toDesignToken);
-    appStatus = { kind: 'ready' };
-  }
+function applyUpdate(data: SensorData): void {
+	sensorData = data;
+	fans = data.fans.map(toDesignToken);
+	appStatus = { kind: "ready" };
+}
 
-  $effect(() => {
-    let cancelled = false;
+$effect(() => {
+	let cancelled = false;
 
-    const init = async () => {
-      try {
-        const initial = await getSensors();
-        if (!cancelled) applyUpdate(initial);
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        console.error('[mac-fan-ctrl] Failed to fetch initial sensors:', e);
-        if (!cancelled) appStatus = { kind: 'error', message };
-      }
+	const init = async () => {
+		try {
+			const initial = await getSensors();
+			if (!cancelled) applyUpdate(initial);
+		} catch (e) {
+			const message = e instanceof Error ? e.message : String(e);
+			console.error("[mac-fan-ctrl] Failed to fetch initial sensors:", e);
+			if (!cancelled) appStatus = { kind: "error", message };
+		}
 
-      try {
-        unlisten = await listenToSensorUpdates((data) => {
-          if (!cancelled) applyUpdate(data);
-        });
-        if (cancelled && unlisten) { unlisten(); unlisten = null; }
-      } catch (e) {
-        console.error('[mac-fan-ctrl] Failed to subscribe:', e);
-      }
-    };
+		try {
+			unlisten = await listenToSensorUpdates((data) => {
+				if (!cancelled) applyUpdate(data);
+			});
+			if (cancelled && unlisten) {
+				unlisten();
+				unlisten = null;
+			}
+		} catch (e) {
+			console.error("[mac-fan-ctrl] Failed to subscribe:", e);
+		}
+	};
 
-    void init();
+	void init();
 
-    return () => {
-      cancelled = true;
-      unlisten?.();
-      unlisten = null;
-    };
-  });
+	return () => {
+		cancelled = true;
+		unlisten?.();
+		unlisten = null;
+	};
+});
 
-  const skeletonBarClass = "rounded bg-gray-200 dark:bg-[#333] animate-pulse";
-  const skeletonRowClass = "flex gap-3 px-3";
+const skeletonBarClass = "rounded bg-gray-200 dark:bg-[#333] animate-pulse";
+const skeletonRowClass = "flex gap-3 px-3";
 </script>
 
 {#if appStatus.kind === 'loading'}

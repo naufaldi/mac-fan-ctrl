@@ -1,82 +1,114 @@
 <script lang="ts">
-  import { Battery, Cpu, HardDrive, Monitor, Thermometer, Wifi } from "lucide-svelte";
-  import { cn } from "$lib/cn";
-  import {
-    getAllSensorsForDisplay,
-    getReadMoreLabel,
-    isPerCoreTemperatureUnavailable,
-    shouldShowReadMore,
-    SUMMARY_SENSOR_LIMIT,
-  } from "$lib/sensorListPaneState";
-  import type { SensorData, Sensor } from "$lib/types";
+import {
+	Battery,
+	Cpu,
+	HardDrive,
+	Monitor,
+	Thermometer,
+	Wifi,
+} from "lucide-svelte";
+import { cn } from "$lib/cn";
+import {
+	getAllSensorsForDisplay,
+	getReadMoreLabel,
+	isPerCoreTemperatureUnavailable,
+	SUMMARY_SENSOR_LIMIT,
+	shouldShowReadMore,
+} from "$lib/sensorListPaneState";
+import type { Sensor, SensorData } from "$lib/types";
 
-  interface Props {
-    sensorData: SensorData | null;
-  }
+interface Props {
+	sensorData: SensorData | null;
+}
 
-  let { sensorData }: Props = $props();
+let { sensorData }: Props = $props();
 
-  const displaySensors = $derived(sensorData ? getAllSensorsForDisplay(sensorData) : []);
-  const perCoreTemperatureUnavailable = $derived(
-    isPerCoreTemperatureUnavailable(sensorData)
-  );
-  const loading = $derived(!sensorData);
-  let expanded: boolean = $state(false);
-  const showReadMore = $derived(shouldShowReadMore(displaySensors.length));
-  const visibleSensors = $derived(
-    !expanded && showReadMore ? displaySensors.slice(0, SUMMARY_SENSOR_LIMIT) : displaySensors
-  );
-  const cnClasses = (
-    ...inputs: Array<string | undefined | null | false>
-  ): string => cn(...inputs);
+const displaySensors = $derived(
+	sensorData ? getAllSensorsForDisplay(sensorData) : [],
+);
+const perCoreTemperatureUnavailable = $derived(
+	isPerCoreTemperatureUnavailable(sensorData),
+);
+const loading = $derived(!sensorData);
+let expanded: boolean = $state(false);
+const showReadMore = $derived(shouldShowReadMore(displaySensors.length));
+const visibleSensors = $derived(
+	!expanded && showReadMore
+		? displaySensors.slice(0, SUMMARY_SENSOR_LIMIT)
+		: displaySensors,
+);
+const cnClasses = (
+	...inputs: Array<string | undefined | null | false>
+): string => cn(...inputs);
 
-  function getStatusColor(value: number | null): string {
-    if (value === null) return "text-(--text-muted)";
-    return "text-gray-900 dark:text-gray-100";
-  }
+function getStatusColor(value: number | null): string {
+	if (value === null) return "text-(--text-muted)";
+	return "text-gray-900 dark:text-gray-100";
+}
 
-  function getStatusDotColor(value: number | null): string {
-    if (value === null) return "bg-gray-400";
-    if (value > 85) return "bg-red-500";
-    if (value >= 70) return "bg-yellow-500";
-    return "bg-green-500";
-  }
+function getStatusDotColor(value: number | null): string {
+	if (value === null) return "bg-gray-400";
+	if (value > 85) return "bg-red-500";
+	if (value >= 70) return "bg-yellow-500";
+	return "bg-green-500";
+}
 
-  function formatValue(sensor: Sensor): string {
-    if (sensor.name === "Disk Drives:") {
-      return "";
-    }
+function formatValue(sensor: Sensor): string {
+	if (sensor.name === "Disk Drives:") {
+		return "";
+	}
 
-    if (sensor.value === null) {
-      return "N/A";
-    }
+	if (sensor.value === null) {
+		return "N/A";
+	}
 
-    return `${Math.round(sensor.value)}`;
-  }
+	return `${Math.round(sensor.value)}`;
+}
 
-  function getSensorIcon(name: string) {
-    const lowerName = name.toLowerCase();
-    if (name === "Disk Drives:") return null;
-    if (lowerName.includes('cpu')) return Cpu;
-    if (lowerName.includes('gpu')) return Monitor;
-    if (lowerName.includes('ram') || lowerName.includes('memory')) return Monitor; // Fallback since MemoryStick isn't always available, let's use Thermometer or something else
-    if (lowerName.includes('ssd') || lowerName.includes('storage') || lowerName.includes('hdd')) return HardDrive;
-    if (lowerName.includes('battery')) return Battery;
-    if (lowerName.includes('airport') || lowerName.includes('wi-fi') || lowerName.includes('wifi')) return Wifi;
-    return Thermometer;
-  }
+function getSensorIcon(name: string) {
+	const lowerName = name.toLowerCase();
+	if (name === "Disk Drives:") return null;
+	if (lowerName.includes("cpu")) return Cpu;
+	if (lowerName.includes("gpu")) return Monitor;
+	if (lowerName.includes("ram") || lowerName.includes("memory")) return Monitor; // Fallback since MemoryStick isn't always available, let's use Thermometer or something else
+	if (
+		lowerName.includes("ssd") ||
+		lowerName.includes("storage") ||
+		lowerName.includes("hdd")
+	)
+		return HardDrive;
+	if (lowerName.includes("battery")) return Battery;
+	if (
+		lowerName.includes("airport") ||
+		lowerName.includes("wi-fi") ||
+		lowerName.includes("wifi")
+	)
+		return Wifi;
+	return Thermometer;
+}
 
-  function getSensorIconColor(name: string) {
-    const lowerName = name.toLowerCase();
-    if (name === "Disk Drives:") return "text-(--text-muted)";
-    if (lowerName.includes('cpu')) return "text-green-600 dark:text-green-500";
-    if (lowerName.includes('gpu')) return "text-green-600 dark:text-green-500";
-    if (lowerName.includes('ram') || lowerName.includes('memory')) return "text-green-600 dark:text-green-500";
-    if (lowerName.includes('ssd') || lowerName.includes('storage') || lowerName.includes('hdd')) return "text-gray-600 dark:text-gray-400";
-    if (lowerName.includes('battery')) return "text-gray-600 dark:text-gray-400";
-    if (lowerName.includes('airport') || lowerName.includes('wi-fi') || lowerName.includes('wifi')) return "text-blue-500";
-    return "text-gray-500";
-  }
+function getSensorIconColor(name: string) {
+	const lowerName = name.toLowerCase();
+	if (name === "Disk Drives:") return "text-(--text-muted)";
+	if (lowerName.includes("cpu")) return "text-green-600 dark:text-green-500";
+	if (lowerName.includes("gpu")) return "text-green-600 dark:text-green-500";
+	if (lowerName.includes("ram") || lowerName.includes("memory"))
+		return "text-green-600 dark:text-green-500";
+	if (
+		lowerName.includes("ssd") ||
+		lowerName.includes("storage") ||
+		lowerName.includes("hdd")
+	)
+		return "text-gray-600 dark:text-gray-400";
+	if (lowerName.includes("battery")) return "text-gray-600 dark:text-gray-400";
+	if (
+		lowerName.includes("airport") ||
+		lowerName.includes("wi-fi") ||
+		lowerName.includes("wifi")
+	)
+		return "text-blue-500";
+	return "text-gray-500";
+}
 </script>
 
 <aside class={cnClasses("min-h-0 overflow-y-auto bg-(--surface-1)")} aria-label="Temperature sensors panel">

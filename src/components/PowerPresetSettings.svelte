@@ -1,6 +1,5 @@
 <script lang="ts">
 import { cn } from "$lib/cn";
-import type { PowerPresetConfig, PowerSource, Preset } from "$lib/types";
 import {
 	getCurrentPowerSource,
 	getPowerPresetConfig,
@@ -8,20 +7,41 @@ import {
 	listenToPowerSourceChanges,
 	setPowerPresetConfig,
 } from "$lib/tauriCommands";
+import type { PowerPresetConfig, PowerSource, Preset } from "$lib/types";
 
-let config: PowerPresetConfig = $state({ enabled: false, ac_preset: null, battery_preset: null });
+let config: PowerPresetConfig = $state({
+	enabled: false,
+	ac_preset: null,
+	battery_preset: null,
+});
 let powerSource: PowerSource = $state("unknown");
 let presets: Preset[] = $state([]);
 
 $effect(() => {
-	getPowerPresetConfig().then((c) => { config = c; }).catch(() => {});
-	getCurrentPowerSource().then((s) => { powerSource = s; }).catch(() => {});
-	getPresets().then((p) => { presets = p; }).catch(() => {});
+	getPowerPresetConfig()
+		.then((c) => {
+			config = c;
+		})
+		.catch(() => {});
+	getCurrentPowerSource()
+		.then((s) => {
+			powerSource = s;
+		})
+		.catch(() => {});
+	getPresets()
+		.then((p) => {
+			presets = p;
+		})
+		.catch(() => {});
 });
 
 $effect(() => {
-	const unlistenPromise = listenToPowerSourceChanges((s) => { powerSource = s; });
-	return () => { unlistenPromise.then((unlisten) => unlisten()); };
+	const unlistenPromise = listenToPowerSourceChanges((s) => {
+		powerSource = s;
+	});
+	return () => {
+		unlistenPromise.then((unlisten) => unlisten());
+	};
 });
 
 async function handleToggle(): Promise<void> {
@@ -53,7 +73,11 @@ async function handleBatteryPreset(event: Event): Promise<void> {
 }
 
 const powerSourceLabel = $derived(
-	powerSource === "ac" ? "AC Power" : powerSource === "battery" ? "Battery" : "Unknown"
+	powerSource === "ac"
+		? "AC Power"
+		: powerSource === "battery"
+			? "Battery"
+			: "Unknown",
 );
 
 const selectClass =

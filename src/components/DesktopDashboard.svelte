@@ -1,15 +1,21 @@
 <script lang="ts">
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "$lib/cn";
 import type { SensorData as DesignTokenSensor } from "$lib/designTokens";
+import {
+	getPrivilegeStatus,
+	installHelper,
+	listenCheckForUpdates,
+	listenShowAbout,
+	reconnectWriter,
+} from "$lib/tauriCommands";
 import type { SensorData } from "$lib/types";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getPrivilegeStatus, listenShowAbout, listenCheckForUpdates, installHelper, reconnectWriter } from "$lib/tauriCommands";
 import AboutDialog from "./AboutDialog.svelte";
-import PreferencesDialog from "./PreferencesDialog.svelte";
-import UpdateDialog from "./UpdateDialog.svelte";
 import FanControlPane from "./FanControlPane.svelte";
+import PreferencesDialog from "./PreferencesDialog.svelte";
 import PresetDropdown from "./PresetDropdown.svelte";
 import SensorListPane from "./SensorListPane.svelte";
+import UpdateDialog from "./UpdateDialog.svelte";
 
 interface Props {
 	fans: DesignTokenSensor[];
@@ -22,16 +28,21 @@ const rawFans = $derived(sensorData?.fans ?? []);
 const sensors = $derived(sensorData?.details ?? []);
 
 let hasWriteAccess: boolean = $state(true);
-let bannerMessage: string = $state('Fan control requires elevated privileges.');
+let bannerMessage: string = $state("Fan control requires elevated privileges.");
 
 $effect(() => {
 	getPrivilegeStatus()
-		.then((status) => { hasWriteAccess = status.has_write_access; })
-		.catch(() => { hasWriteAccess = false; });
+		.then((status) => {
+			hasWriteAccess = status.has_write_access;
+		})
+		.catch(() => {
+			hasWriteAccess = false;
+		});
 });
 
 const isDevMode = $derived(
-	bannerMessage.includes('development mode') || bannerMessage.includes('sudo pnpm')
+	bannerMessage.includes("development mode") ||
+		bannerMessage.includes("sudo pnpm"),
 );
 
 async function handleGrantAccess(): Promise<void> {
@@ -41,7 +52,7 @@ async function handleGrantAccess(): Promise<void> {
 		hasWriteAccess = true;
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
-		if (!msg.includes('cancelled') && !msg.includes('canceled')) {
+		if (!msg.includes("cancelled") && !msg.includes("canceled")) {
 			bannerMessage = msg;
 		}
 	}
@@ -64,13 +75,21 @@ async function handleAlwaysOnTop(): Promise<void> {
 }
 
 $effect(() => {
-	const unlistenPromise = listenShowAbout(() => { showAbout = true; });
-	return () => { unlistenPromise.then((unlisten) => unlisten()); };
+	const unlistenPromise = listenShowAbout(() => {
+		showAbout = true;
+	});
+	return () => {
+		unlistenPromise.then((unlisten) => unlisten());
+	};
 });
 
 $effect(() => {
-	const unlistenPromise = listenCheckForUpdates(() => { showUpdate = true; });
-	return () => { unlistenPromise.then((unlisten) => unlisten()); };
+	const unlistenPromise = listenCheckForUpdates(() => {
+		showUpdate = true;
+	});
+	return () => {
+		unlistenPromise.then((unlisten) => unlisten());
+	};
 });
 
 async function handleHideToMenuBar(): Promise<void> {

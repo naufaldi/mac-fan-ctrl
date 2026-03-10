@@ -1,7 +1,7 @@
 <script lang="ts">
 import { fade, scale } from "svelte/transition";
 import { cn } from "$lib/cn";
-import { getAppInfo, openUrl, type AppInfo } from "$lib/tauriCommands";
+import { type AppInfo, getAppInfo, openUrl } from "$lib/tauriCommands";
 
 interface Props {
 	onclose: () => void;
@@ -15,8 +15,12 @@ let closeButtonEl: HTMLButtonElement | undefined = $state(undefined);
 
 $effect(() => {
 	getAppInfo()
-		.then((info) => { appInfo = info; })
-		.catch(() => { appInfo = { name: "Mac Fan Control", version: "unknown", identifier: "" }; });
+		.then((info) => {
+			appInfo = info;
+		})
+		.catch(() => {
+			appInfo = { name: "Mac Fan Control", version: "unknown", identifier: "" };
+		});
 });
 
 $effect(() => {
