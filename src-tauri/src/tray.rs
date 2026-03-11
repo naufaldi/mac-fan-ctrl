@@ -375,15 +375,7 @@ fn show_main_window(app: &AppHandle) {
 }
 
 fn quit_app(app: &AppHandle) {
-    let state = app.state::<AppState>();
-    if let (Ok(writer_guard), Ok(mut control)) =
-        (state.smc_writer.lock(), state.fan_control.lock())
-    {
-        if let Some(writer) = writer_guard.as_deref() {
-            control.restore_all_auto(writer);
-        }
-    }
-    app.exit(0);
+    crate::show_quit_confirmation(app);
 }
 
 fn apply_preset_from_tray(app: &AppHandle, preset_name: &str) {

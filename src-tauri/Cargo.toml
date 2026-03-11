@@ -22,6 +22,7 @@ libc = "0.2"
 ctrlc = { version = "3.4", features = ["termination"] }
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-dialog = "2"
 core-foundation = "0.10"
 
 [dev-dependencies]
