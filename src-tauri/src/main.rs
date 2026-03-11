@@ -13,6 +13,7 @@ mod smc_protocol;
 mod smc_writer;
 mod tray;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -23,26 +24,106 @@ use log::{debug_log, warn_log};
 use power_monitor::PowerSource;
 use smc::FanMode;
 
+static QUIT_DIALOG_SHOWING: AtomicBool = AtomicBool::new(false);
+static EXIT_CONFIRMED: AtomicBool = AtomicBool::new(false);
+
 fn bootstrap_menu_bar(app: &mut tauri::App) {
+    use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
+
     debug_log!("[fanguard] Starting shell bootstrap");
 
-    match tauri::menu::Menu::default(app.handle()) {
-        Ok(menu) => match app.set_menu(menu) {
-            Ok(_) => debug_log!("[fanguard] Menu bar bootstrapped successfully"),
-            Err(error) => {
-                debug_log!(
-                    "[fanguard] Menu bar setup failed, continuing without custom menu: {error}"
-                );
-            }
-        },
-        Err(error) => {
-            debug_log!(
-                "[fanguard] Menu baseline not available, continuing with defaults: {error}"
-            );
-        }
+    let handle = app.handle();
+    let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+        let about = PredefinedMenuItem::about(handle, Some("About FanGuard"), None)?;
+        let sep1 = PredefinedMenuItem::separator(handle)?;
+        let hide = PredefinedMenuItem::hide(handle, Some("Hide FanGuard"))?;
+        let hide_others = PredefinedMenuItem::hide_others(handle, None)?;
+        let show_all = PredefinedMenuItem::show_all(handle, None)?;
+        let sep2 = PredefinedMenuItem::separator(handle)?;
+        let quit_item = MenuItem::with_id(
+            handle,
+            "app_quit",
+            "Quit FanGuard",
+            true,
+            Some("CmdOrCtrl+Q"),
+        )?;
+
+        let app_submenu = SubmenuBuilder::new(handle, "FanGuard")
+            .item(&about)
+            .item(&sep1)
+            .item(&hide)
+            .item(&hide_others)
+            .item(&show_all)
+            .item(&sep2)
+            .item(&quit_item)
+            .build()?;
+
+        let menu = MenuBuilder::new(handle).item(&app_submenu).build()?;
+        app.set_menu(menu)?;
+        debug_log!("[fanguard] Menu bar bootstrapped successfully");
+        Ok(())
+    })();
+
+    if let Err(error) = result {
+        debug_log!("[fanguard] Menu bar setup failed, continuing without custom menu: {error}");
     }
 
     debug_log!("[fanguard] Shell bootstrap complete");
+}
+
+pub fn show_quit_confirmation(app_handle: &tauri::AppHandle) {
+    if QUIT_DIALOG_SHOWING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    // Ensure the app has Dock presence so macOS will display the dialog
+    #[cfg(target_os = "macos")]
+    let _ = app_handle.set_activation_policy(tauri::ActivationPolicy::Regular);
+
+    let handle = app_handle.clone();
+    thread::spawn(move || {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+        let confirmed = handle
+            .dialog()
+            .message("Fan speeds will be reset to automatic. Are you sure you want to quit?")
+            .title("Quit FanGuard")
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom("Quit".into(), "Cancel".into()))
+            .blocking_show();
+
+        QUIT_DIALOG_SHOWING.store(false, Ordering::SeqCst);
+
+        if confirmed {
+            restore_fans(&handle);
+            clear_active_preset(&handle);
+            EXIT_CONFIRMED.store(true, Ordering::SeqCst);
+            handle.exit(0);
+        } else {
+            // User cancelled — hide back to menu bar if no window is visible
+            #[cfg(target_os = "macos")]
+            {
+                let window_visible = handle
+                    .get_webview_window("main")
+                    .and_then(|w| w.is_visible().ok())
+                    .unwrap_or(false);
+                if !window_visible {
+                    let _ = handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                }
+            }
+        }
+    });
+}
+
+fn clear_active_preset(app_handle: &tauri::AppHandle) {
+    let state = app_handle.state::<AppState>();
+    let Ok(mut store) = state.preset_store.lock() else {
+        return;
+    };
+    store.active_preset = Some("Automatic".to_string());
+    if let Err(e) = presets::save_preset_store(&store) {
+        warn_log!("[fanguard] Failed to clear active preset on quit: {e}");
+    }
 }
 
 fn run_fan_control_tick(app_handle: &tauri::AppHandle, sensor_data: &mut smc::SensorData) {
@@ -422,6 +503,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .setup(|app| {
             bootstrap_menu_bar(app);
@@ -483,6 +565,11 @@ fn main() {
             commands::install_helper,
             commands::reconnect_writer,
         ])
+        .on_menu_event(|app_handle, event| {
+            if event.id().as_ref() == "app_quit" {
+                show_quit_confirmation(app_handle);
+            }
+        })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 // Hide to tray instead of closing
@@ -499,9 +586,11 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = &event {
-                restore_fans(app_handle);
+        .run(|_app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                if !EXIT_CONFIRMED.load(Ordering::SeqCst) {
+                    api.prevent_exit();
+                }
             }
         });
 }
