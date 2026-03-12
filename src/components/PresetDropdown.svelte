@@ -117,6 +117,9 @@ async function handleDeletePreset(
 	}
 }
 
+// -- Derived --
+const builtinPresets = $derived(presets.filter((p) => p.builtin));
+const customPresets = $derived(presets.filter((p) => !p.builtin));
 const allMenuItems = $derived([...builtinPresets, ...customPresets]);
 
 function handleKeydown(event: KeyboardEvent): void {
@@ -151,11 +154,6 @@ function handleKeydown(event: KeyboardEvent): void {
 		}
 	}
 }
-
-// ── Derived ────────────────────────────────────────────────────────────────
-
-const builtinPresets = $derived(presets.filter((p) => p.builtin));
-const customPresets = $derived(presets.filter((p) => !p.builtin));
 
 const chromeButtonClass =
 	"rounded-[5px] border border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#3a3a3a] px-3 py-1 text-[12px] text-(--text-primary) shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-colors hover:bg-gray-50 dark:hover:bg-[#444] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";

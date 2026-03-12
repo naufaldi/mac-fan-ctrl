@@ -4,14 +4,15 @@ import { cn } from "$lib/cn";
 import type { SensorData as DesignTokenSensor } from "$lib/designTokens";
 import {
 	getPrivilegeStatus,
+	getTrayDisplayMode,
 	hideToMenuBar,
 	installHelper,
 	listenCheckForUpdates,
 	listenShowAbout,
 	reconnectWriter,
+	setTrayDisplayMode,
 } from "$lib/tauriCommands";
 import type { SensorData } from "$lib/types";
-import { getTrayDisplayMode, setTrayDisplayMode } from "$lib/tauriCommands";
 import AboutDialog from "./AboutDialog.svelte";
 import FanControlPane from "./FanControlPane.svelte";
 import PreferencesDialog from "./PreferencesDialog.svelte";
@@ -121,7 +122,6 @@ async function handleTrayModeChange(mode: number): Promise<void> {
 	} catch (error) {
 		console.error("[DesktopDashboard] Failed to set tray display mode:", error);
 	}
-}
 }
 
 const chromeButtonClass =

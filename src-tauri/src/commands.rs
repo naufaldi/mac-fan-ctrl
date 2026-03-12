@@ -523,7 +523,7 @@ pub fn set_alert_config(
         config.enabled = enabled;
     }
     if let Some(threshold) = params.cpu_threshold {
-        if !threshold.is_finite() || threshold < 0.0 || threshold > 150.0 {
+        if !threshold.is_finite() || !(0.0..=150.0).contains(&threshold) {
             return Err("CPU threshold must be between 0 and 150°C".to_string());
         }
         config.cpu_threshold = threshold;
