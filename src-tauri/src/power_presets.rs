@@ -12,21 +12,11 @@ use crate::fs_util::fix_ownership_if_root;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PowerPresetConfig {
     pub enabled: bool,
     pub ac_preset: Option<String>,
     pub battery_preset: Option<String>,
-}
-
-impl Default for PowerPresetConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            ac_preset: None,
-            battery_preset: None,
-        }
-    }
 }
 
 // ── Persistence ──────────────────────────────────────────────────────────────

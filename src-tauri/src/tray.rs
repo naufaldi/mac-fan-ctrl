@@ -4,7 +4,7 @@
 //! provides quick access to fan controls, presets, and the main window.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 
 use tauri::menu::{CheckMenuItem, Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::tray::{TrayIcon, TrayIconBuilder, TrayIconEvent};
@@ -18,6 +18,19 @@ static LAST_TRAY_CLICK_MS: AtomicU64 = AtomicU64::new(0);
 /// How long (ms) to guard the menu from rebuilds after a click.
 /// 15 seconds is generous — users rarely keep a menu open longer.
 const MENU_GUARD_MS: u64 = 15_000;
+
+/// Tray display mode: 0 = temperature (default), 1 = fan RPM
+static TRAY_DISPLAY_MODE: AtomicU8 = AtomicU8::new(0);
+
+/// Set the tray display mode (0 = temperature, 1 = fan RPM).
+pub fn set_tray_display_mode(mode: u8) {
+    TRAY_DISPLAY_MODE.store(mode.min(1), Ordering::Relaxed);
+}
+
+/// Get the current tray display mode.
+pub fn get_tray_display_mode() -> u8 {
+    TRAY_DISPLAY_MODE.load(Ordering::Relaxed)
+}
 
 fn now_millis() -> u64 {
     std::time::SystemTime::now()
@@ -227,13 +240,27 @@ pub fn update_tray_title(app_handle: &AppHandle, sensor_data: &SensorData) {
         });
 
     let prefix = if is_alert { "⚠️ " } else { "" };
-    let temp_str = cpu_temp
-        .map(|v| format!("{prefix}{v:.0}°C"))
-        .unwrap_or_else(|| "--°C".to_string());
+
+    let title = match get_tray_display_mode() {
+        1 => {
+            // Fan RPM mode: show first fan's actual RPM
+            sensor_data
+                .fans
+                .first()
+                .map(|f| format!("{} RPM", f.actual as u32))
+                .unwrap_or_else(|| "-- RPM".to_string())
+        }
+        _ => {
+            // Temperature mode (default) with alert prefix
+            cpu_temp
+                .map(|v| format!("{prefix}{v:.0}°C"))
+                .unwrap_or_else(|| "--°C".to_string())
+        }
+    };
 
     if let Some(tray_state) = app_handle.try_state::<TrayHandle>() {
-        debug_log!("[tray] set_title({temp_str})");
-        let _ = tray_state.0.set_title(Some(&temp_str));
+        debug_log!("[tray] set_title({title})");
+        let _ = tray_state.0.set_title(Some(&title));
     }
 }
 

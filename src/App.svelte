@@ -22,7 +22,11 @@ let sensorData: SensorData | null = $state(null);
 let fans: DesignTokenSensor[] = $state([]);
 let unlisten: (() => void) | null = null;
 
-function toDesignToken(fan: FanData): DesignTokenSensor {
+// Historical data buffer for sparklines (last 60 readings per fan)
+const SPARKLINE_BUFFER_SIZE = 60;
+const fanHistory: Map<number, number[]> = new Map();
+
+function toDesignToken(fan: FanData, sparklineData?: number[]): DesignTokenSensor {
 	return {
 		id: `fan-${fan.index}`,
 		fanIndex: fan.index,
@@ -34,12 +38,23 @@ function toDesignToken(fan: FanData): DesignTokenSensor {
 		maxRpm: Math.round(fan.max),
 		targetRpm: Math.round(fan.target),
 		controlMode: fan.mode === "forced" ? "constant" : "auto",
+		sparklineData,
 	};
+}
+
+function appendToHistory(fanIndex: number, rpm: number): number[] {
+	const existing = fanHistory.get(fanIndex) ?? [];
+	const updated = [...existing, rpm].slice(-SPARKLINE_BUFFER_SIZE);
+	fanHistory.set(fanIndex, updated);
+	return updated;
 }
 
 function applyUpdate(data: SensorData): void {
 	sensorData = data;
-	fans = data.fans.map(toDesignToken);
+	fans = data.fans.map((fan) => {
+		const history = appendToHistory(fan.index, Math.round(fan.actual));
+		return toDesignToken(fan, history);
+	});
 	appStatus = { kind: "ready" };
 }
 

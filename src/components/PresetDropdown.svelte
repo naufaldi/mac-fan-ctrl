@@ -19,6 +19,7 @@ let savePresetName: string = $state("");
 let saveError: string = $state("");
 let applyError: string = $state("");
 let deleteError: string = $state("");
+let focusedIndex: number = $state(-1);
 
 // ── Load presets ───────────────────────────────────────────────────────────
 
@@ -44,12 +45,14 @@ $effect(() => {
 function toggleDropdown(): void {
 	isOpen = !isOpen;
 	if (isOpen) {
+		focusedIndex = -1;
 		void refreshPresets();
 	}
 }
 
 function closeDropdown(): void {
 	isOpen = false;
+	focusedIndex = -1;
 	applyError = "";
 	deleteError = "";
 }
@@ -114,17 +117,43 @@ async function handleDeletePreset(
 	}
 }
 
+// -- Derived --
+const builtinPresets = $derived(presets.filter((p) => p.builtin));
+const customPresets = $derived(presets.filter((p) => !p.builtin));
+const allMenuItems = $derived([...builtinPresets, ...customPresets]);
+
 function handleKeydown(event: KeyboardEvent): void {
 	if (event.key === "Escape") {
 		closeDropdown();
 		isSaveDialogOpen = false;
+		return;
+	}
+
+	if (!isOpen) return;
+
+	const itemCount = allMenuItems.length + 1; // +1 for "Save current as..."
+
+	if (event.key === "ArrowDown") {
+		event.preventDefault();
+		focusedIndex = focusedIndex < itemCount - 1 ? focusedIndex + 1 : 0;
+	} else if (event.key === "ArrowUp") {
+		event.preventDefault();
+		focusedIndex = focusedIndex > 0 ? focusedIndex - 1 : itemCount - 1;
+	} else if (event.key === "Home") {
+		event.preventDefault();
+		focusedIndex = 0;
+	} else if (event.key === "End") {
+		event.preventDefault();
+		focusedIndex = itemCount - 1;
+	} else if (event.key === "Enter" && focusedIndex >= 0) {
+		event.preventDefault();
+		if (focusedIndex < allMenuItems.length) {
+			void handleApplyPreset(allMenuItems[focusedIndex].name);
+		} else {
+			openSaveDialog();
+		}
 	}
 }
-
-// ── Derived ────────────────────────────────────────────────────────────────
-
-const builtinPresets = $derived(presets.filter((p) => p.builtin));
-const customPresets = $derived(presets.filter((p) => !p.builtin));
 
 const chromeButtonClass =
 	"rounded-[5px] border border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#3a3a3a] px-3 py-1 text-[12px] text-(--text-primary) shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-colors hover:bg-gray-50 dark:hover:bg-[#444] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
@@ -140,6 +169,9 @@ const dropdownItemClass =
     class={cn(chromeButtonClass)}
     type="button"
     onclick={toggleDropdown}
+    aria-haspopup="menu"
+    aria-expanded={isOpen}
+    aria-label="Select fan preset"
   >
     {activePresetName} ▾
   </button>
@@ -152,17 +184,21 @@ const dropdownItemClass =
 
     <!-- Dropdown menu -->
     <div
+      role="menu"
+      aria-label="Fan presets"
       class={cn(
         'absolute top-full left-0 mt-1 z-50 min-w-[200px] rounded-md border border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#2d2d2d] shadow-lg overflow-hidden'
       )}
     >
       <!-- Built-in presets -->
-      {#each builtinPresets as preset (preset.name)}
+      {#each builtinPresets as preset, i (preset.name)}
         <button
           type="button"
+          role="menuitem"
           class={cn(
             dropdownItemClass,
-            preset.name === activePresetName ? 'font-semibold' : ''
+            preset.name === activePresetName ? 'font-semibold' : '',
+            focusedIndex === i ? 'bg-blue-500 text-white' : ''
           )}
           onclick={() => handleApplyPreset(preset.name)}
         >
@@ -176,12 +212,14 @@ const dropdownItemClass =
       <!-- Separator + custom presets -->
       {#if customPresets.length > 0}
         <div class="border-t border-gray-200 dark:border-[#4a4a4a]"></div>
-        {#each customPresets as preset (preset.name)}
+        {#each customPresets as preset, i (preset.name)}
           <button
             type="button"
+            role="menuitem"
             class={cn(
               dropdownItemClass,
-              preset.name === activePresetName ? 'font-semibold' : ''
+              preset.name === activePresetName ? 'font-semibold' : '',
+              focusedIndex === builtinPresets.length + i ? 'bg-blue-500 text-white' : ''
             )}
             onclick={() => handleApplyPreset(preset.name)}
           >
@@ -190,12 +228,12 @@ const dropdownItemClass =
               {#if preset.name === activePresetName}
                 <span class="text-[10px]">✓</span>
               {/if}
-              <!-- svelte-ignore a11y_click_events_have_key_events -->
               <span
                 role="button"
                 tabindex="0"
                 class="text-[10px] text-gray-400 hover:text-red-500 px-1 cursor-pointer"
                 onclick={(e) => handleDeletePreset(preset.name, e)}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleDeletePreset(preset.name, e); }}
                 aria-label={`Delete preset ${preset.name}`}
               >
                 ✕
@@ -221,7 +259,12 @@ const dropdownItemClass =
       <div class="border-t border-gray-200 dark:border-[#4a4a4a]"></div>
       <button
         type="button"
-        class={cn(dropdownItemClass, 'text-(--text-muted)')}
+        role="menuitem"
+        class={cn(
+          dropdownItemClass,
+          'text-(--text-muted)',
+          focusedIndex === allMenuItems.length ? 'bg-blue-500 text-white' : ''
+        )}
         onclick={openSaveDialog}
       >
         Save current as...
@@ -251,6 +294,7 @@ const dropdownItemClass =
         type="text"
         bind:value={savePresetName}
         placeholder="Preset name"
+        aria-label="Preset name"
         class={cn(
           'w-full rounded-[4px] border bg-white dark:bg-[#2a2a2a] px-2 py-1.5 text-[12px] text-(--text-primary) focus:outline-none focus:ring-2 focus:ring-blue-500',
           saveError ? 'border-red-400 dark:border-red-500 mb-1' : 'border-gray-300 dark:border-[#4a4a4a] mb-3'

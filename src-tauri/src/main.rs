@@ -524,7 +524,7 @@ fn main() {
             // Start with Regular policy so the app appears in Cmd+Tab.
             // Switch to Accessory when the user hides to menu bar.
             #[cfg(target_os = "macos")]
-            let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+            app.set_activation_policy(tauri::ActivationPolicy::Regular);
 
             // Register signal handler for SIGTERM/SIGINT
             let signal_handle = app.handle().clone();
@@ -556,6 +556,8 @@ fn main() {
             commands::request_privilege_restart,
             commands::diagnose_fan_control,
             commands::open_url,
+            commands::set_tray_display_mode,
+            commands::get_tray_display_mode,
             commands::get_alert_config,
             commands::set_alert_config,
             commands::get_power_preset_config,
