@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 
 use tauri::menu::{CheckMenuItem, Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::tray::{TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{image::Image, AppHandle, Manager};
+use tauri::{image::Image, AppHandle, Emitter, Manager};
 
 /// Timestamp (millis since epoch) of last tray icon click.
 /// While the menu is likely open (within MENU_GUARD_MS of a click),
@@ -59,12 +59,15 @@ fn mark_menu_closed() {
 use crate::commands::{AppState, TrayHandle};
 use crate::fan_control::FanControlConfig;
 use crate::log::{debug_log, warn_log};
+use crate::power_monitor::PowerSource;
 use crate::presets;
 use crate::smc::{FanData, FanMode, SensorData, SensorService};
 
 // ── Menu item ID constants ──────────────────────────────────────────────────
 
 const SHOW_WINDOW: &str = "show_window";
+const ABOUT: &str = "about";
+const CHECK_FOR_UPDATES: &str = "check_for_updates";
 const QUIT: &str = "quit";
 const PRESET_PREFIX: &str = "preset::";
 const FAN_AUTO_PREFIX: &str = "fan_auto::";
@@ -82,7 +85,7 @@ pub fn setup_tray(app: &mut tauri::App) -> Result<TrayIcon, tauri::Error> {
         .icon(icon)
         .icon_as_template(true)
         .title("--°C")
-        .tooltip("Mac Fan Control")
+        .tooltip("FanGuard Beta")
         .menu(&initial_menu)
         .show_menu_on_left_click(true)
         .on_menu_event(handle_menu_event)
@@ -91,13 +94,19 @@ pub fn setup_tray(app: &mut tauri::App) -> Result<TrayIcon, tauri::Error> {
 }
 
 fn build_initial_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
-    let show_item = MenuItem::with_id(app, SHOW_WINDOW, "Show Mac Fan Control", true, None::<&str>)?;
-    let sep = PredefinedMenuItem::separator(app)?;
-    let quit_item = MenuItem::with_id(app, QUIT, "Quit Mac Fan Control", true, None::<&str>)?;
+    let show_item = MenuItem::with_id(app, SHOW_WINDOW, "Show FanGuard", true, None::<&str>)?;
+    let sep1 = PredefinedMenuItem::separator(app)?;
+    let about_item = MenuItem::with_id(app, ABOUT, "About FanGuard", true, None::<&str>)?;
+    let update_item = MenuItem::with_id(app, CHECK_FOR_UPDATES, "Check for Updates...", true, None::<&str>)?;
+    let sep2 = PredefinedMenuItem::separator(app)?;
+    let quit_item = MenuItem::with_id(app, QUIT, "Quit FanGuard", true, None::<&str>)?;
 
     MenuBuilder::new(app)
         .item(&show_item)
-        .item(&sep)
+        .item(&sep1)
+        .item(&about_item)
+        .item(&update_item)
+        .item(&sep2)
         .item(&quit_item)
         .build()
 }
@@ -109,9 +118,18 @@ fn build_tray_menu(
     fans: &[FanData],
     active_preset: Option<&str>,
     all_presets: &[presets::Preset],
+    power_source: PowerSource,
 ) -> Result<Menu<tauri::Wry>, tauri::Error> {
-    let show_item = MenuItem::with_id(app, SHOW_WINDOW, "Show Mac Fan Control", true, None::<&str>)?;
+    let show_item = MenuItem::with_id(app, SHOW_WINDOW, "Show FanGuard", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
+
+    // Power source indicator
+    let power_label = match power_source {
+        PowerSource::Ac => "Power: AC",
+        PowerSource::Battery => "Power: Battery",
+        PowerSource::Unknown => "Power: Unknown",
+    };
+    let power_item = MenuItem::with_id(app, "power_source", power_label, false, None::<&str>)?;
 
     // Available fans section
     let fans_header = MenuItem::with_id(app, "fans_header", "Available fans:", false, None::<&str>)?;
@@ -137,12 +155,16 @@ fn build_tray_menu(
         .collect();
 
     let sep3 = PredefinedMenuItem::separator(app)?;
-    let quit_item = MenuItem::with_id(app, QUIT, "Quit Mac Fan Control", true, None::<&str>)?;
+    let about_item = MenuItem::with_id(app, ABOUT, "About FanGuard", true, None::<&str>)?;
+    let update_item = MenuItem::with_id(app, CHECK_FOR_UPDATES, "Check for Updates...", true, None::<&str>)?;
+    let sep4 = PredefinedMenuItem::separator(app)?;
+    let quit_item = MenuItem::with_id(app, QUIT, "Quit FanGuard", true, None::<&str>)?;
 
     // Assemble the menu
     let mut builder = MenuBuilder::new(app)
         .item(&show_item)
         .item(&sep1)
+        .item(&power_item)
         .item(&fans_header);
 
     for submenu in &fan_submenus {
@@ -155,7 +177,13 @@ fn build_tray_menu(
         builder = builder.item(preset_item);
     }
 
-    builder.item(&sep3).item(&quit_item).build()
+    builder
+        .item(&sep3)
+        .item(&about_item)
+        .item(&update_item)
+        .item(&sep4)
+        .item(&quit_item)
+        .build()
 }
 
 fn build_fan_submenu(
@@ -198,6 +226,21 @@ fn build_fan_submenu(
 // ── Tray updates (called from sensor stream) ────────────────────────────────
 
 pub fn update_tray_title(app_handle: &AppHandle, sensor_data: &SensorData) {
+    let cpu_temp = sensor_data
+        .summary
+        .cpu_package
+        .as_ref()
+        .and_then(|s| s.value);
+
+    let is_alert = app_handle
+        .try_state::<crate::commands::AppState>()
+        .and_then(|state| state.alert_config.lock().ok().map(|c| c.clone()))
+        .is_some_and(|config| {
+            config.enabled && cpu_temp.is_some_and(|t| t >= config.cpu_threshold)
+        });
+
+    let prefix = if is_alert { "⚠️ " } else { "" };
+
     let title = match get_tray_display_mode() {
         1 => {
             // Fan RPM mode: show first fan's actual RPM
@@ -208,13 +251,9 @@ pub fn update_tray_title(app_handle: &AppHandle, sensor_data: &SensorData) {
                 .unwrap_or_else(|| "-- RPM".to_string())
         }
         _ => {
-            // Temperature mode (default)
-            sensor_data
-                .summary
-                .cpu_package
-                .as_ref()
-                .and_then(|s| s.value)
-                .map(|v| format!("{:.0}°C", v))
+            // Temperature mode (default) with alert prefix
+            cpu_temp
+                .map(|v| format!("{prefix}{v:.0}°C"))
                 .unwrap_or_else(|| "--°C".to_string())
         }
     };
@@ -253,11 +292,19 @@ pub fn update_tray_menu(app_handle: &AppHandle, sensor_data: &SensorData) {
         .map(|s| presets::all_presets(&s, &fan_indices, &fan_maxes))
         .unwrap_or_default();
 
+    let power_source = app_state
+        .current_power_source
+        .lock()
+        .ok()
+        .map(|g| *g)
+        .unwrap_or(PowerSource::Unknown);
+
     match build_tray_menu(
         app_handle,
         &sensor_data.fans,
         active_preset.as_deref(),
         &all_presets,
+        power_source,
     ) {
         Ok(menu) => {
             debug_log!(
@@ -283,6 +330,14 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
 
     match id {
         SHOW_WINDOW => show_main_window(app),
+        ABOUT => {
+            show_main_window(app);
+            let _ = app.emit("show-about", ());
+        }
+        CHECK_FOR_UPDATES => {
+            show_main_window(app);
+            let _ = app.emit("check-for-updates", ());
+        }
         QUIT => quit_app(app),
         _ if id.starts_with(PRESET_PREFIX) => {
             let preset_name = &id[PRESET_PREFIX.len()..];
@@ -335,6 +390,10 @@ fn handle_tray_icon_event(tray: &TrayIcon, event: TrayIconEvent) {
 // ── Action helpers ──────────────────────────────────────────────────────────
 
 fn show_main_window(app: &AppHandle) {
+    // Restore Dock + Cmd+Tab presence before showing
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
@@ -343,15 +402,7 @@ fn show_main_window(app: &AppHandle) {
 }
 
 fn quit_app(app: &AppHandle) {
-    let state = app.state::<AppState>();
-    if let (Ok(writer_guard), Ok(mut control)) =
-        (state.smc_writer.lock(), state.fan_control.lock())
-    {
-        if let Some(writer) = writer_guard.as_deref() {
-            control.restore_all_auto(writer);
-        }
-    }
-    app.exit(0);
+    crate::show_quit_confirmation(app);
 }
 
 fn apply_preset_from_tray(app: &AppHandle, preset_name: &str) {
@@ -359,42 +410,7 @@ fn apply_preset_from_tray(app: &AppHandle, preset_name: &str) {
     let app = app.clone();
 
     std::thread::spawn(move || {
-        let state = app.state::<AppState>();
-
-        let writer_guard = match state.smc_writer.lock() {
-            Ok(g) => g,
-            Err(_) => return,
-        };
-        let Some(writer) = writer_guard.as_deref() else {
-            return;
-        };
-
-        let mut service = SensorService::new();
-        let fans = service.read_fans_only();
-        let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
-        let fan_maxes: HashMap<u8, f32> = fans.iter().map(|f| (f.index, f.max)).collect();
-
-        let mut store = match state.preset_store.lock() {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        let all = presets::all_presets(&store, &fan_indices, &fan_maxes);
-        let Some(preset) = all.into_iter().find(|p| p.name == name) else {
-            return;
-        };
-
-        let mut control = match state.fan_control.lock() {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-
-        control.restore_all_auto(writer);
-        for (fan_index, config) in &preset.configs {
-            let _ = control.set_config(*fan_index, config.clone(), &fans, writer);
-        }
-
-        store.active_preset = Some(name);
-        let _ = presets::save_preset_store(&store);
+        crate::apply_preset_by_name(&app, &name);
     });
 }
 
@@ -432,7 +448,7 @@ fn set_fan_rpm_from_tray(app: &AppHandle, fan_index: u8, rpm: f32) {
         };
 
         let mut service = SensorService::new();
-        let fans = service.read_fans_only();
+        let fans = service.read_fans_only().unwrap_or_default();
 
         let config = FanControlConfig::ConstantRpm { target_rpm: rpm };
         let mut control = match state.fan_control.lock() {

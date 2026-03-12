@@ -95,3 +95,13 @@ export interface Preset {
 	readonly builtin: boolean;
 	readonly configs: Record<string, FanControlConfig>;
 }
+
+// ── Power source ─────────────────────────────────────────────────────────────
+
+export type PowerSource = "ac" | "battery" | "unknown";
+
+export interface PowerPresetConfig {
+	readonly enabled: boolean;
+	readonly ac_preset: string | null;
+	readonly battery_preset: string | null;
+}

@@ -1,12 +1,23 @@
 <script lang="ts">
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "$lib/cn";
 import type { SensorData as DesignTokenSensor } from "$lib/designTokens";
+import {
+	getPrivilegeStatus,
+	hideToMenuBar,
+	installHelper,
+	listenCheckForUpdates,
+	listenShowAbout,
+	reconnectWriter,
+} from "$lib/tauriCommands";
 import type { SensorData } from "$lib/types";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getPrivilegeStatus, getTrayDisplayMode, openUrl, requestPrivilegeRestart, setTrayDisplayMode } from "$lib/tauriCommands";
+import { getTrayDisplayMode, setTrayDisplayMode } from "$lib/tauriCommands";
+import AboutDialog from "./AboutDialog.svelte";
 import FanControlPane from "./FanControlPane.svelte";
+import PreferencesDialog from "./PreferencesDialog.svelte";
 import PresetDropdown from "./PresetDropdown.svelte";
 import SensorListPane from "./SensorListPane.svelte";
+import UpdateDialog from "./UpdateDialog.svelte";
 
 interface Props {
 	fans: DesignTokenSensor[];
@@ -19,37 +30,75 @@ const rawFans = $derived(sensorData?.fans ?? []);
 const sensors = $derived(sensorData?.details ?? []);
 
 let hasWriteAccess: boolean = $state(true);
-let bannerMessage: string = $state('Fan control requires elevated privileges.');
+let bannerMessage: string = $state("Fan control requires elevated privileges.");
 
 $effect(() => {
 	getPrivilegeStatus()
-		.then((status) => { hasWriteAccess = status.has_write_access; })
-		.catch(() => { hasWriteAccess = false; });
+		.then((status) => {
+			hasWriteAccess = status.has_write_access;
+		})
+		.catch(() => {
+			hasWriteAccess = false;
+		});
 });
 
 const isDevMode = $derived(
-	bannerMessage.includes('development mode') || bannerMessage.includes('sudo pnpm')
+	bannerMessage.includes("development mode") ||
+		bannerMessage.includes("sudo pnpm"),
 );
 
 async function handleGrantAccess(): Promise<void> {
 	try {
-		await requestPrivilegeRestart();
+		await installHelper();
+		await reconnectWriter();
+		hasWriteAccess = true;
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
-		if (!msg.includes('cancelled') && !msg.includes('canceled')) {
+		if (!msg.includes("cancelled") && !msg.includes("canceled")) {
 			bannerMessage = msg;
 		}
 	}
 }
 
-const GITHUB_REPO_URL = "https://github.com/nicholasgriffintn/mac-fan-ctrl";
-
 let showPreferences: boolean = $state(false);
+let showAbout: boolean = $state(false);
+let showUpdate: boolean = $state(false);
+let alwaysOnTop: boolean = $state(false);
+
 let trayDisplayMode: number = $state(0);
+
+async function handleAlwaysOnTop(): Promise<void> {
+	try {
+		const next = !alwaysOnTop;
+		await getCurrentWindow().setAlwaysOnTop(next);
+		alwaysOnTop = next;
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		console.error("[DesktopDashboard] Failed to set always-on-top:", msg);
+	}
+}
+
+$effect(() => {
+	const unlistenPromise = listenShowAbout(() => {
+		showAbout = true;
+	});
+	return () => {
+		unlistenPromise.then((unlisten) => unlisten());
+	};
+});
+
+$effect(() => {
+	const unlistenPromise = listenCheckForUpdates(() => {
+		showUpdate = true;
+	});
+	return () => {
+		unlistenPromise.then((unlisten) => unlisten());
+	};
+});
 
 async function handleHideToMenuBar(): Promise<void> {
 	try {
-		await getCurrentWindow().hide();
+		await hideToMenuBar();
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
 		console.error("[DesktopDashboard] Failed to hide window:", msg);
@@ -73,14 +122,6 @@ async function handleTrayModeChange(mode: number): Promise<void> {
 		console.error("[DesktopDashboard] Failed to set tray display mode:", error);
 	}
 }
-
-async function handleHelp(): Promise<void> {
-	try {
-		await openUrl(GITHUB_REPO_URL);
-	} catch (error) {
-		const msg = error instanceof Error ? error.message : String(error);
-		console.error("[DesktopDashboard] Failed to open help URL:", msg);
-	}
 }
 
 const chromeButtonClass =
@@ -127,19 +168,47 @@ const chromeButtonClass =
 
   <footer
     class={cn(
-      "flex shrink-0 items-center justify-end gap-2 border-t border-gray-300 dark:border-black/50 bg-[#ececec] dark:bg-[#2d2d2d] px-4 py-2"
+      "flex shrink-0 items-center gap-2 border-t border-gray-300 dark:border-black/50 bg-[#ececec] dark:bg-[#2d2d2d] px-4 py-2"
     )}
   >
+    <button
+      class={cn(
+        chromeButtonClass,
+        alwaysOnTop && "border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300"
+      )}
+      type="button"
+      aria-label={alwaysOnTop ? "Unpin window" : "Pin window on top"}
+      aria-pressed={alwaysOnTop}
+      onclick={handleAlwaysOnTop}
+    >
+      {alwaysOnTop ? "Pinned" : "Pin on Top"}
+    </button>
+    <div class="grow"></div>
     <button class={cn(chromeButtonClass)} type="button" onclick={handleHideToMenuBar}>
       Hide to menu bar
     </button>
     <button class={cn(chromeButtonClass)} type="button" onclick={handlePreferences}>
       Preferences...
     </button>
-    <button class={cn(chromeButtonClass, 'w-8 font-serif italic')} type="button" aria-label="Help" onclick={handleHelp}>
-      ?
+    <button class={cn(chromeButtonClass)} type="button" onclick={() => { showUpdate = true; }}>
+      Check for Updates
+    </button>
+    <button class={cn(chromeButtonClass)} type="button" aria-label="About" onclick={() => { showAbout = true; }}>
+      About
     </button>
   </footer>
+
+  {#if showPreferences}
+    <PreferencesDialog onclose={() => { showPreferences = false; }} />
+  {/if}
+
+  {#if showAbout}
+    <AboutDialog onclose={() => { showAbout = false; }} />
+  {/if}
+
+  {#if showUpdate}
+    <UpdateDialog onclose={() => { showUpdate = false; }} />
+  {/if}
 </section>
 
 <!-- Preferences modal -->

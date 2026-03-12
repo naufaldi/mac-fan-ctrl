@@ -4,5 +4,15 @@
 	"description": "Default capability for local desktop UI",
 	"windows": ["main"],
 	"platforms": ["macOS", "linux", "windows"],
-	"permissions": ["core:default"]
+	"permissions": [
+		"core:default",
+		"core:window:allow-hide",
+		"core:window:allow-show",
+		"core:window:allow-set-always-on-top",
+		"core:window:allow-set-focus",
+		"core:window:allow-close",
+		"core:window:allow-minimize",
+		"core:window:allow-set-size",
+		"updater:default"
+	]
 }

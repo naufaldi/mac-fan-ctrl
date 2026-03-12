@@ -1,5 +1,5 @@
 /**
- * Design Token Types for mac-fan-ctrl
+ * Design Token Types for FanGuard
  * Mirrors CSS variables defined in src/app.css @theme block
  */
 

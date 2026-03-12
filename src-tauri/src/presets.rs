@@ -2,7 +2,7 @@
 //!
 //! Manages named presets that store per-fan control configurations.
 //! Built-in presets: "Automatic" (all Auto), "Full Blast" (all max RPM).
-//! Custom presets are persisted to `~/.config/mac-fan-ctrl/presets.json`.
+//! Custom presets are persisted to `~/.config/fanguard/presets.json`.
 
 use std::collections::HashMap;
 use std::fs;
@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::fan_control::FanControlConfig;
+use crate::fs_util::fix_ownership_if_root;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -94,7 +95,7 @@ pub fn builtin_sensor(fan_indices: &[u8]) -> Preset {
 fn config_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("~/.config"))
-        .join("mac-fan-ctrl")
+        .join("fanguard")
 }
 
 fn presets_file() -> PathBuf {
@@ -115,7 +116,10 @@ pub fn save_preset_store(store: &PresetStore) -> Result<(), String> {
     fs::create_dir_all(&dir).map_err(|e| format!("Failed to create config dir: {e}"))?;
     let json =
         serde_json::to_string_pretty(store).map_err(|e| format!("Failed to serialize: {e}"))?;
-    fs::write(&path, json).map_err(|e| format!("Failed to write presets: {e}"))
+    fs::write(&path, &json).map_err(|e| format!("Failed to write presets: {e}"))?;
+    fix_ownership_if_root(&dir);
+    fix_ownership_if_root(&path);
+    Ok(())
 }
 
 // ── Preset operations ────────────────────────────────────────────────────────

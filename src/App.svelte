@@ -1,90 +1,100 @@
 <script lang="ts">
-  import DesktopDashboard from './components/DesktopDashboard.svelte';
-  import type { SensorData as DesignTokenSensor } from '$lib/designTokens';
-  import type { FanData, SensorData } from '$lib/types';
-  import { getSensors, listenToSensorUpdates } from '$lib/tauriCommands';
-  import { cn } from "$lib/cn";
+import type { Component } from "svelte";
+import { cn } from "$lib/cn";
+import type { SensorData as DesignTokenSensor } from "$lib/designTokens";
+import { getSensors, listenToSensorUpdates } from "$lib/tauriCommands";
+import type { FanData, SensorData } from "$lib/types";
 
-  type AppStatus =
-    | { readonly kind: 'loading' }
-    | { readonly kind: 'error'; readonly message: string }
-    | { readonly kind: 'ready' };
+// Dynamic import prevents DesktopDashboard's import chain from blocking
+// the loading skeleton. If any module in the chain throws at runtime,
+// the skeleton and error states still render.
+const dashboardPromise: Promise<
+	Component<{ fans: DesignTokenSensor[]; sensorData: SensorData | null }>
+> = import("./components/DesktopDashboard.svelte").then((m) => m.default);
 
-  let appStatus: AppStatus = $state({ kind: 'loading' });
-  let sensorData: SensorData | null = $state(null);
-  let fans: DesignTokenSensor[] = $state([]);
-  let unlisten: (() => void) | null = null;
+type AppStatus =
+	| { readonly kind: "loading" }
+	| { readonly kind: "error"; readonly message: string }
+	| { readonly kind: "ready" };
 
-  // Historical data buffer for sparklines (last 60 readings per fan)
-  const SPARKLINE_BUFFER_SIZE = 60;
-  const fanHistory: Map<number, number[]> = new Map();
+let appStatus: AppStatus = $state({ kind: "loading" });
+let sensorData: SensorData | null = $state(null);
+let fans: DesignTokenSensor[] = $state([]);
+let unlisten: (() => void) | null = null;
 
-  function toDesignToken(fan: FanData, sparklineData?: number[]): DesignTokenSensor {
-    return {
-      id: `fan-${fan.index}`,
-      fanIndex: fan.index,
-      label: fan.label,
-      value: Math.round(fan.actual),
-      unit: 'rpm',
-      status: 'normal',
-      minRpm: Math.round(fan.min),
-      maxRpm: Math.round(fan.max),
-      targetRpm: Math.round(fan.target),
-      controlMode: fan.mode === 'forced' ? 'constant' : 'auto',
-      sparklineData,
-    };
-  }
+// Historical data buffer for sparklines (last 60 readings per fan)
+const SPARKLINE_BUFFER_SIZE = 60;
+const fanHistory: Map<number, number[]> = new Map();
 
-  function appendToHistory(fanIndex: number, rpm: number): number[] {
-    const existing = fanHistory.get(fanIndex) ?? [];
-    const updated = [...existing, rpm].slice(-SPARKLINE_BUFFER_SIZE);
-    fanHistory.set(fanIndex, updated);
-    return updated;
-  }
+function toDesignToken(fan: FanData, sparklineData?: number[]): DesignTokenSensor {
+	return {
+		id: `fan-${fan.index}`,
+		fanIndex: fan.index,
+		label: fan.label,
+		value: Math.round(fan.actual),
+		unit: "rpm",
+		status: "normal",
+		minRpm: Math.round(fan.min),
+		maxRpm: Math.round(fan.max),
+		targetRpm: Math.round(fan.target),
+		controlMode: fan.mode === "forced" ? "constant" : "auto",
+		sparklineData,
+	};
+}
 
-  function applyUpdate(data: SensorData): void {
-    sensorData = data;
-    fans = data.fans.map((fan) => {
-      const history = appendToHistory(fan.index, Math.round(fan.actual));
-      return toDesignToken(fan, history);
-    });
-    appStatus = { kind: 'ready' };
-  }
+function appendToHistory(fanIndex: number, rpm: number): number[] {
+	const existing = fanHistory.get(fanIndex) ?? [];
+	const updated = [...existing, rpm].slice(-SPARKLINE_BUFFER_SIZE);
+	fanHistory.set(fanIndex, updated);
+	return updated;
+}
 
-  $effect(() => {
-    let cancelled = false;
+function applyUpdate(data: SensorData): void {
+	sensorData = data;
+	fans = data.fans.map((fan) => {
+		const history = appendToHistory(fan.index, Math.round(fan.actual));
+		return toDesignToken(fan, history);
+	});
+	appStatus = { kind: "ready" };
+}
 
-    const init = async () => {
-      try {
-        const initial = await getSensors();
-        if (!cancelled) applyUpdate(initial);
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        console.error('[mac-fan-ctrl] Failed to fetch initial sensors:', e);
-        if (!cancelled) appStatus = { kind: 'error', message };
-      }
+$effect(() => {
+	let cancelled = false;
 
-      try {
-        unlisten = await listenToSensorUpdates((data) => {
-          if (!cancelled) applyUpdate(data);
-        });
-        if (cancelled && unlisten) { unlisten(); unlisten = null; }
-      } catch (e) {
-        console.error('[mac-fan-ctrl] Failed to subscribe:', e);
-      }
-    };
+	const init = async () => {
+		try {
+			const initial = await getSensors();
+			if (!cancelled) applyUpdate(initial);
+		} catch (e) {
+			const message = e instanceof Error ? e.message : String(e);
+			console.error("[fanguard] Failed to fetch initial sensors:", e);
+			if (!cancelled) appStatus = { kind: "error", message };
+		}
 
-    void init();
+		try {
+			unlisten = await listenToSensorUpdates((data) => {
+				if (!cancelled) applyUpdate(data);
+			});
+			if (cancelled && unlisten) {
+				unlisten();
+				unlisten = null;
+			}
+		} catch (e) {
+			console.error("[fanguard] Failed to subscribe:", e);
+		}
+	};
 
-    return () => {
-      cancelled = true;
-      unlisten?.();
-      unlisten = null;
-    };
-  });
+	void init();
 
-  const skeletonBarClass = "rounded bg-gray-200 dark:bg-[#333] animate-pulse";
-  const skeletonRowClass = "flex gap-3 px-3";
+	return () => {
+		cancelled = true;
+		unlisten?.();
+		unlisten = null;
+	};
+});
+
+const skeletonBarClass = "rounded bg-gray-200 dark:bg-[#333] animate-pulse";
+const skeletonRowClass = "flex gap-3 px-3";
 </script>
 
 {#if appStatus.kind === 'loading'}
@@ -168,7 +178,16 @@
   </main>
 {:else}
   <!-- Ready state -->
-  <main class={cn("flex h-full w-full")}>
-    <DesktopDashboard {fans} {sensorData} />
-  </main>
+  {#await dashboardPromise then DashboardComponent}
+    <main class={cn("flex h-full w-full")}>
+      <DashboardComponent {fans} {sensorData} />
+    </main>
+  {:catch error}
+    <main class={cn("flex h-full w-full items-center justify-center bg-[#ececec] dark:bg-[#1e1e1e]")}>
+      <div class={cn("flex flex-col items-center gap-1")}>
+        <p class={cn("text-[12px] font-medium text-(--text-primary)")}>Failed to load dashboard</p>
+        <p class={cn("text-[11px] text-(--text-muted)")}>{error instanceof Error ? error.message : String(error)}</p>
+      </div>
+    </main>
+  {/await}
 {/if}

@@ -1,11 +1,39 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { FanControlConfig, Preset, SensorData } from "./types";
+import type { FanControlConfig, PowerPresetConfig, PowerSource, Preset, SensorData } from "./types";
 
 export const SENSOR_UPDATE_EVENT = "sensor_update";
 
 export async function pingBackend(message: string): Promise<string> {
 	return invoke<string>("ping_backend", { message });
+}
+
+// ── App info ────────────────────────────────────────────────────────────────
+
+export interface AppInfo {
+	name: string;
+	version: string;
+	identifier: string;
+}
+
+export async function getAppInfo(): Promise<AppInfo> {
+	return invoke<AppInfo>("get_app_info");
+}
+
+export async function listenShowAbout(
+	callback: () => void,
+): Promise<UnlistenFn> {
+	return listen("show-about", () => {
+		callback();
+	});
+}
+
+export async function listenCheckForUpdates(
+	callback: () => void,
+): Promise<UnlistenFn> {
+	return listen("check-for-updates", () => {
+		callback();
+	});
 }
 
 export async function getSensors(): Promise<SensorData> {
@@ -18,6 +46,22 @@ export async function listenToSensorUpdates(
 	return listen<SensorData>(SENSOR_UPDATE_EVENT, ({ payload }) => {
 		onUpdate(payload);
 	});
+}
+
+// ── Alert commands ──────────────────────────────────────────────────────────
+
+export interface AlertConfig {
+	enabled: boolean;
+	cpu_threshold: number;
+	cooldown_secs: number;
+}
+
+export async function getAlertConfig(): Promise<AlertConfig> {
+	return invoke<AlertConfig>("get_alert_config");
+}
+
+export async function setAlertConfig(params: Partial<AlertConfig>): Promise<AlertConfig> {
+	return invoke<AlertConfig>("set_alert_config", { params });
 }
 
 // ── Fan control commands ─────────────────────────────────────────────────────
@@ -78,6 +122,28 @@ export async function deletePreset(name: string): Promise<void> {
 	return invoke<void>("delete_preset", { name });
 }
 
+// ── Power preset commands ───────────────────────────────────────────────────
+
+export async function getPowerPresetConfig(): Promise<PowerPresetConfig> {
+	return invoke<PowerPresetConfig>("get_power_preset_config");
+}
+
+export async function setPowerPresetConfig(params: Partial<PowerPresetConfig>): Promise<PowerPresetConfig> {
+	return invoke<PowerPresetConfig>("set_power_preset_config", { params });
+}
+
+export async function getCurrentPowerSource(): Promise<PowerSource> {
+	return invoke<PowerSource>("get_current_power_source");
+}
+
+export async function listenToPowerSourceChanges(
+	onUpdate: (source: PowerSource) => void,
+): Promise<UnlistenFn> {
+	return listen<PowerSource>("power_source_changed", ({ payload }) => {
+		onUpdate(payload);
+	});
+}
+
 // ── Privilege commands ──────────────────────────────────────────────────────
 
 export interface PrivilegeStatus {
@@ -100,6 +166,18 @@ export async function setTrayDisplayMode(mode: number): Promise<void> {
 
 export async function getTrayDisplayMode(): Promise<number> {
 	return invoke<number>("get_tray_display_mode");
+}
+
+export async function hideToMenuBar(): Promise<void> {
+	return invoke<void>("hide_to_menu_bar");
+}
+
+export async function installHelper(): Promise<string> {
+	return invoke<string>("install_helper");
+}
+
+export async function reconnectWriter(): Promise<boolean> {
+	return invoke<boolean>("reconnect_writer");
 }
 
 // ── URL commands ────────────────────────────────────────────────────────────

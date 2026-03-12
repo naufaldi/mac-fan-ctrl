@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+button,
+[role="button"],
+select {
+  cursor: pointer;
+}
+
 @theme {
   --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   --font-mono: "SF Mono", SFMono-Regular, Monaco, monospace;

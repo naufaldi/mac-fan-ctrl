@@ -8,5 +8,13 @@
 			"cssModules": false,
 			"tailwindDirectives": true
 		}
+	},
+	"linter": {
+		"rules": {
+			"correctness": {
+				"noUnusedImports": "off",
+				"noUnusedVariables": "off"
+			}
+		}
 	}
 }

@@ -18,9 +18,15 @@ describe("sensorListPaneState", () => {
 		expect(shouldShowReadMore(SUMMARY_SENSOR_LIMIT + 1)).toBe(true);
 	});
 
+	it("does not show Read More for typical sensor counts", () => {
+		expect(shouldShowReadMore(9)).toBe(false);
+		expect(shouldShowReadMore(12)).toBe(false);
+		expect(shouldShowReadMore(15)).toBe(false);
+	});
+
 	it("builds read more/show less labels", () => {
-		expect(getReadMoreLabel(false, 6)).toBe("Read More (2) ▼");
-		expect(getReadMoreLabel(true, 6)).toBe("Show Less ▲");
+		expect(getReadMoreLabel(false, 18)).toBe("Read More (3) ▼");
+		expect(getReadMoreLabel(true, 18)).toBe("Show Less ▲");
 		expect(getReadMoreLabel(false, 1)).toBe("Read More (0) ▼");
 	});
 

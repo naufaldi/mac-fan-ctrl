@@ -1,16 +1,25 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use serde::Serialize;
-use tauri::State;
+use serde::{Deserialize, Serialize};
+use tauri::{Manager, State};
 
+use crate::alerts::{self, AlertConfig};
 use crate::fan_control::{FanControlConfig, FanControlState};
 use crate::log::{debug_log, warn_log};
+use crate::power_monitor::PowerSource;
+use crate::power_presets::{self, PowerPresetConfig};
 use crate::presets::{self, Preset, PresetStore};
 use crate::smc::SensorService;
+use crate::smc_client::SmcSocketClient;
 use crate::smc_writer::{SmcWriteApi, SmcWriter};
 
 pub const SENSOR_UPDATE_EVENT: &str = "sensor_update";
+
+const HELPER_SOCKET: &str = "/var/run/fanguard.sock";
+const HELPER_INSTALL_DIR: &str = "/Library/PrivilegedHelperTools";
+const LAUNCHDAEMON_DIR: &str = "/Library/LaunchDaemons";
+const DAEMON_LABEL: &str = "io.github.naufaldi.fanguard.helper";
 
 // ── Tray handle wrapper ─────────────────────────────────────────────────────
 
@@ -22,24 +31,68 @@ pub struct AppState {
     pub fan_control: Mutex<FanControlState>,
     pub smc_writer: Mutex<Option<Box<dyn SmcWriteApi>>>,
     pub preset_store: Mutex<PresetStore>,
+    pub alert_config: Mutex<AlertConfig>,
+    pub power_preset_config: Mutex<PowerPresetConfig>,
+    pub current_power_source: Mutex<PowerSource>,
 }
 
 impl AppState {
     pub fn new() -> Self {
         let writer: Option<Box<dyn SmcWriteApi>> = SmcWriter::new()
+            .map(|w| Box::new(w) as Box<dyn SmcWriteApi>)
+            .or_else(|direct_err| {
+                warn_log!(
+                    "[fanguard] Direct SMC writer failed: {direct_err} — trying socket client"
+                );
+                SmcSocketClient::new()
+                    .map(|c| Box::new(c) as Box<dyn SmcWriteApi>)
+            })
             .map_err(|e| {
-                warn_log!("[mac-fan-ctrl] SMC writer init failed (fan control disabled): {e}");
+                warn_log!("[fanguard] Socket client also failed (fan control disabled): {e}");
                 e
             })
-            .ok()
-            .map(|w| Box::new(w) as Box<dyn SmcWriteApi>);
+            .ok();
 
         Self {
             fan_control: Mutex::new(FanControlState::new()),
             smc_writer: Mutex::new(writer),
             preset_store: Mutex::new(presets::load_preset_store()),
+            alert_config: Mutex::new(alerts::load_alert_config()),
+            power_preset_config: Mutex::new(power_presets::load_power_preset_config()),
+            current_power_source: Mutex::new(crate::power_monitor::current_power_source()),
         }
     }
+}
+
+// ── App info ────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, Clone)]
+pub struct AppInfo {
+    pub name: String,
+    pub version: String,
+    pub identifier: String,
+}
+
+#[tauri::command]
+pub fn get_app_info(app_handle: tauri::AppHandle) -> Result<AppInfo, String> {
+    let config = app_handle.config();
+    Ok(AppInfo {
+        name: config.product_name.clone().unwrap_or_else(|| "FanGuard".to_string()),
+        version: config.version.clone().unwrap_or_else(|| "0.0.0".to_string()),
+        identifier: config.identifier.clone(),
+    })
+}
+
+// ── Window management ────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn hide_to_menu_bar(app_handle: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    #[cfg(target_os = "macos")]
+    let _ = app_handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    Ok(())
 }
 
 // ── Existing commands ────────────────────────────────────────────────────────
@@ -185,7 +238,7 @@ pub fn get_presets(state: State<'_, AppState>) -> Result<Vec<Preset>, String> {
 
     // Only need fan metadata (indices + max RPM) — skip expensive temperature/ioreg reads
     let mut service = SensorService::new();
-    let fans = service.read_fans_only();
+    let fans = service.read_fans_only().map_err(|e| e.to_string())?;
 
     let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
     let fan_maxes: HashMap<u8, f32> = fans.iter().map(|f| (f.index, f.max)).collect();
@@ -208,7 +261,11 @@ pub fn apply_preset(state: State<'_, AppState>, name: String) -> Result<(), Stri
 
     // Only need fan metadata — skip expensive temperature/ioreg reads
     let mut service = SensorService::new();
-    let fans = service.read_fans_only();
+    let fans = service.read_fans_only().map_err(|e| e.to_string())?;
+
+    if fans.is_empty() {
+        return Err("No fans detected — cannot apply preset".to_string());
+    }
 
     let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
     let fan_maxes: HashMap<u8, f32> = fans.iter().map(|f| (f.index, f.max)).collect();
@@ -223,8 +280,10 @@ pub fn apply_preset(state: State<'_, AppState>, name: String) -> Result<(), Stri
 
     let mut fan_control = state.fan_control.lock().map_err(|e| e.to_string())?;
 
-    // First restore all fans to auto
-    fan_control.restore_all_auto(writer);
+    // Only restore fans to auto if there are active overrides (avoids unnecessary Ftst toggle)
+    if !fan_control.configs().is_empty() {
+        fan_control.restore_all_auto(writer);
+    }
 
     // Then apply preset configs
     for (fan_index, config) in &preset.configs {
@@ -246,7 +305,7 @@ pub fn save_preset(state: State<'_, AppState>, name: String) -> Result<(), Strin
 
     // Only need fan metadata for duplicate detection — skip expensive temperature/ioreg reads
     let mut service = SensorService::new();
-    let fans = service.read_fans_only();
+    let fans = service.read_fans_only().map_err(|e| e.to_string())?;
     let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
     let fan_maxes: HashMap<u8, f32> = fans.iter().map(|f| (f.index, f.max)).collect();
 
@@ -436,6 +495,191 @@ pub fn open_url(url: String) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+// ── Alert commands ───────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_alert_config(state: State<'_, AppState>) -> Result<AlertConfig, String> {
+    let config = state.alert_config.lock().map_err(|e| e.to_string())?;
+    Ok(config.clone())
+}
+
+#[derive(Deserialize)]
+pub struct SetAlertConfigParams {
+    pub enabled: Option<bool>,
+    pub cpu_threshold: Option<f64>,
+    pub cooldown_secs: Option<u64>,
+}
+
+#[tauri::command]
+pub fn set_alert_config(
+    state: State<'_, AppState>,
+    params: SetAlertConfigParams,
+) -> Result<AlertConfig, String> {
+    let mut config = state.alert_config.lock().map_err(|e| e.to_string())?;
+
+    if let Some(enabled) = params.enabled {
+        config.enabled = enabled;
+    }
+    if let Some(threshold) = params.cpu_threshold {
+        if !threshold.is_finite() || threshold < 0.0 || threshold > 150.0 {
+            return Err("CPU threshold must be between 0 and 150°C".to_string());
+        }
+        config.cpu_threshold = threshold;
+    }
+    if let Some(cooldown) = params.cooldown_secs {
+        config.cooldown_secs = cooldown;
+    }
+
+    alerts::save_alert_config(&config)?;
+    Ok(config.clone())
+}
+
+// ── Power preset commands ────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_power_preset_config(state: State<'_, AppState>) -> Result<PowerPresetConfig, String> {
+    let config = state.power_preset_config.lock().map_err(|e| e.to_string())?;
+    Ok(config.clone())
+}
+
+#[derive(Deserialize)]
+pub struct SetPowerPresetConfigParams {
+    pub enabled: Option<bool>,
+    pub ac_preset: Option<Option<String>>,
+    pub battery_preset: Option<Option<String>>,
+}
+
+#[tauri::command]
+pub fn set_power_preset_config(
+    state: State<'_, AppState>,
+    params: SetPowerPresetConfigParams,
+) -> Result<PowerPresetConfig, String> {
+    let mut config = state.power_preset_config.lock().map_err(|e| e.to_string())?;
+
+    if let Some(enabled) = params.enabled {
+        config.enabled = enabled;
+    }
+    if let Some(ac_preset) = params.ac_preset {
+        config.ac_preset = ac_preset;
+    }
+    if let Some(battery_preset) = params.battery_preset {
+        config.battery_preset = battery_preset;
+    }
+
+    power_presets::save_power_preset_config(&config)?;
+    Ok(config.clone())
+}
+
+#[tauri::command]
+pub fn get_current_power_source(state: State<'_, AppState>) -> Result<PowerSource, String> {
+    let source = state.current_power_source.lock().map_err(|e| e.to_string())?;
+    Ok(*source)
+}
+
+// ── Helper installation commands ─────────────────────────────────────────────
+
+#[tauri::command]
+pub fn install_helper() -> Result<String, String> {
+    let exe_path = std::env::current_exe()
+        .map_err(|e| format!("Failed to get exe path: {e}"))?;
+
+    let helper_binary = find_helper_binary(&exe_path)?;
+
+    let install_path = format!("{HELPER_INSTALL_DIR}/{DAEMON_LABEL}");
+    let plist_path = format!("{LAUNCHDAEMON_DIR}/{DAEMON_LABEL}.plist");
+
+    let plist_content = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{DAEMON_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{install_path}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardErrorPath</key>
+    <string>/tmp/{DAEMON_LABEL}.log</string>
+</dict>
+</plist>"#
+    );
+
+    // Build shell commands for osascript
+    let shell_commands = format!(
+        "mkdir -p '{}' && cp '{}' '{}' && chmod 755 '{}' && chown root:wheel '{}' && /bin/cat > '{}' << 'PLISTEOF'\n{}\nPLISTEOF\nchown root:wheel '{}' && chmod 644 '{}' && launchctl bootout system/{} 2>/dev/null; launchctl bootstrap system '{}'",
+        HELPER_INSTALL_DIR,
+        helper_binary.to_string_lossy(), install_path, install_path, install_path,
+        plist_path, plist_content,
+        plist_path, plist_path,
+        DAEMON_LABEL, plist_path
+    );
+
+    let script = format!(
+        "do shell script {:?} with administrator privileges",
+        shell_commands
+    );
+
+    let result = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to launch osascript: {e}"))?;
+
+    if !result.status.success() {
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        if stderr.contains("User canceled") || stderr.contains("-128") {
+            return Err("User cancelled the authorization request".to_string());
+        }
+        return Err(format!("Installation failed: {stderr}"));
+    }
+
+    // Wait for socket to appear
+    for _ in 0..20 {
+        if std::path::Path::new(HELPER_SOCKET).exists() {
+            return Ok("Helper installed and running".to_string());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+
+    Err("Helper installed but socket not found after 5 seconds".to_string())
+}
+
+fn find_helper_binary(exe_path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    // Production: look in the .app bundle
+    let app_bundle_helper = exe_path
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.join("MacOS/fanguard-helper"));
+
+    if let Some(ref path) = app_bundle_helper {
+        if path.exists() {
+            return Ok(path.clone());
+        }
+    }
+
+    // Dev mode: look in same directory as the binary (target/debug or target/release)
+    let target_dir = exe_path.parent().unwrap_or(exe_path);
+    let debug_helper = target_dir.join("fanguard-helper");
+    if debug_helper.exists() {
+        return Ok(debug_helper);
+    }
+
+    Err("Helper binary not found. Build it with: cargo build --bin fanguard-helper".to_string())
+}
+
+#[tauri::command]
+pub fn reconnect_writer(state: State<'_, AppState>) -> Result<bool, String> {
+    let client = SmcSocketClient::new().map_err(|e| e.to_string())?;
+    let mut writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
+    *writer_guard = Some(Box::new(client));
+    Ok(true)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

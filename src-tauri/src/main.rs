@@ -1,12 +1,19 @@
+mod alerts;
 mod apple_silicon_sensors;
 mod commands;
 mod fan_control;
+mod fs_util;
 mod log;
+mod power_monitor;
+mod power_presets;
 mod presets;
 mod smc;
+mod smc_client;
+mod smc_protocol;
 mod smc_writer;
 mod tray;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -14,28 +21,109 @@ use tauri::{Emitter, Manager};
 
 use commands::AppState;
 use log::{debug_log, warn_log};
+use power_monitor::PowerSource;
 use smc::FanMode;
 
-fn bootstrap_menu_bar(app: &mut tauri::App) {
-    debug_log!("[mac-fan-ctrl] Starting shell bootstrap");
+static QUIT_DIALOG_SHOWING: AtomicBool = AtomicBool::new(false);
+static EXIT_CONFIRMED: AtomicBool = AtomicBool::new(false);
 
-    match tauri::menu::Menu::default(app.handle()) {
-        Ok(menu) => match app.set_menu(menu) {
-            Ok(_) => debug_log!("[mac-fan-ctrl] Menu bar bootstrapped successfully"),
-            Err(error) => {
-                debug_log!(
-                    "[mac-fan-ctrl] Menu bar setup failed, continuing without custom menu: {error}"
-                );
-            }
-        },
-        Err(error) => {
-            debug_log!(
-                "[mac-fan-ctrl] Menu baseline not available, continuing with defaults: {error}"
-            );
-        }
+fn bootstrap_menu_bar(app: &mut tauri::App) {
+    use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
+
+    debug_log!("[fanguard] Starting shell bootstrap");
+
+    let handle = app.handle();
+    let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+        let about = PredefinedMenuItem::about(handle, Some("About FanGuard"), None)?;
+        let sep1 = PredefinedMenuItem::separator(handle)?;
+        let hide = PredefinedMenuItem::hide(handle, Some("Hide FanGuard"))?;
+        let hide_others = PredefinedMenuItem::hide_others(handle, None)?;
+        let show_all = PredefinedMenuItem::show_all(handle, None)?;
+        let sep2 = PredefinedMenuItem::separator(handle)?;
+        let quit_item = MenuItem::with_id(
+            handle,
+            "app_quit",
+            "Quit FanGuard",
+            true,
+            Some("CmdOrCtrl+Q"),
+        )?;
+
+        let app_submenu = SubmenuBuilder::new(handle, "FanGuard")
+            .item(&about)
+            .item(&sep1)
+            .item(&hide)
+            .item(&hide_others)
+            .item(&show_all)
+            .item(&sep2)
+            .item(&quit_item)
+            .build()?;
+
+        let menu = MenuBuilder::new(handle).item(&app_submenu).build()?;
+        app.set_menu(menu)?;
+        debug_log!("[fanguard] Menu bar bootstrapped successfully");
+        Ok(())
+    })();
+
+    if let Err(error) = result {
+        debug_log!("[fanguard] Menu bar setup failed, continuing without custom menu: {error}");
     }
 
-    debug_log!("[mac-fan-ctrl] Shell bootstrap complete");
+    debug_log!("[fanguard] Shell bootstrap complete");
+}
+
+pub fn show_quit_confirmation(app_handle: &tauri::AppHandle) {
+    if QUIT_DIALOG_SHOWING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    // Ensure the app has Dock presence so macOS will display the dialog
+    #[cfg(target_os = "macos")]
+    let _ = app_handle.set_activation_policy(tauri::ActivationPolicy::Regular);
+
+    let handle = app_handle.clone();
+    thread::spawn(move || {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+        let confirmed = handle
+            .dialog()
+            .message("Fan speeds will be reset to automatic. Are you sure you want to quit?")
+            .title("Quit FanGuard")
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom("Quit".into(), "Cancel".into()))
+            .blocking_show();
+
+        QUIT_DIALOG_SHOWING.store(false, Ordering::SeqCst);
+
+        if confirmed {
+            restore_fans(&handle);
+            clear_active_preset(&handle);
+            EXIT_CONFIRMED.store(true, Ordering::SeqCst);
+            handle.exit(0);
+        } else {
+            // User cancelled — hide back to menu bar if no window is visible
+            #[cfg(target_os = "macos")]
+            {
+                let window_visible = handle
+                    .get_webview_window("main")
+                    .and_then(|w| w.is_visible().ok())
+                    .unwrap_or(false);
+                if !window_visible {
+                    let _ = handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                }
+            }
+        }
+    });
+}
+
+fn clear_active_preset(app_handle: &tauri::AppHandle) {
+    let state = app_handle.state::<AppState>();
+    let Ok(mut store) = state.preset_store.lock() else {
+        return;
+    };
+    store.active_preset = Some("Automatic".to_string());
+    if let Err(e) = presets::save_preset_store(&store) {
+        warn_log!("[fanguard] Failed to clear active preset on quit: {e}");
+    }
 }
 
 fn run_fan_control_tick(app_handle: &tauri::AppHandle, sensor_data: &mut smc::SensorData) {
@@ -44,7 +132,7 @@ fn run_fan_control_tick(app_handle: &tauri::AppHandle, sensor_data: &mut smc::Se
         if let Some(writer) = writer_guard.as_deref() {
             if let Ok(mut control) = state.fan_control.lock() {
                 if let Err(error) = control.tick(&sensor_data.details, &sensor_data.fans, writer) {
-                    warn_log!("[mac-fan-ctrl] Fan control tick failed: {error}");
+                    warn_log!("[fanguard] Fan control tick failed: {error}");
                 }
                 // Overlay configured target/mode onto raw SMC data so the
                 // frontend displays the user's settings, not stale readbacks.
@@ -58,22 +146,22 @@ fn run_startup_diagnostics(app_handle: &tauri::AppHandle) {
     let state = app_handle.state::<AppState>();
     let uid = unsafe { libc::getuid() };
     let euid = unsafe { libc::geteuid() };
-    debug_log!("\n[mac-fan-ctrl] === STARTUP DIAGNOSTICS ===");
-    debug_log!("[mac-fan-ctrl] UID={uid} EUID={euid} running_as_root={}", euid == 0);
+    debug_log!("\n[fanguard] === STARTUP DIAGNOSTICS ===");
+    debug_log!("[fanguard] UID={uid} EUID={euid} running_as_root={}", euid == 0);
 
     if let Ok(writer_guard) = state.smc_writer.lock() {
         match writer_guard.as_deref() {
             Some(writer) => {
-                debug_log!("[mac-fan-ctrl] SMC Writer: AVAILABLE");
+                debug_log!("[fanguard] SMC Writer: AVAILABLE");
                 writer.diagnose_fan_control();
             }
             None => {
-                debug_log!("[mac-fan-ctrl] SMC Writer: NOT AVAILABLE — fan control will not work");
-                debug_log!("[mac-fan-ctrl] Likely cause: app not running as root (EUID={euid})");
+                debug_log!("[fanguard] SMC Writer: NOT AVAILABLE — fan control will not work");
+                debug_log!("[fanguard] Likely cause: app not running as root (EUID={euid})");
             }
         }
     }
-    debug_log!("[mac-fan-ctrl] === END STARTUP DIAGNOSTICS ===\n");
+    debug_log!("[fanguard] === END STARTUP DIAGNOSTICS ===\n");
 }
 
 fn restore_active_preset(app_handle: &tauri::AppHandle) {
@@ -90,19 +178,19 @@ fn restore_active_preset(app_handle: &tauri::AppHandle) {
         }
     };
 
-    debug_log!("[mac-fan-ctrl] Restoring saved preset: {preset_name}");
+    debug_log!("[fanguard] Restoring saved preset: {preset_name}");
 
     let writer_guard = match state.smc_writer.lock() {
         Ok(g) => g,
         Err(_) => return,
     };
     let Some(writer) = writer_guard.as_deref() else {
-        debug_log!("[mac-fan-ctrl] Cannot restore preset — SMC writer not available");
+        debug_log!("[fanguard] Cannot restore preset — SMC writer not available");
         return;
     };
 
     let mut service = smc::SensorService::new();
-    let fans = service.read_fans_only();
+    let fans = service.read_fans_only().unwrap_or_default();
     let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
     let fan_maxes: std::collections::HashMap<u8, f32> =
         fans.iter().map(|f| (f.index, f.max)).collect();
@@ -113,7 +201,7 @@ fn restore_active_preset(app_handle: &tauri::AppHandle) {
     };
     let all = presets::all_presets(&store, &fan_indices, &fan_maxes);
     let Some(preset) = all.iter().find(|p| p.name == preset_name) else {
-        debug_log!("[mac-fan-ctrl] Saved preset '{preset_name}' not found — skipping restore");
+        debug_log!("[fanguard] Saved preset '{preset_name}' not found — skipping restore");
         return;
     };
 
@@ -124,11 +212,159 @@ fn restore_active_preset(app_handle: &tauri::AppHandle) {
 
     for (fan_index, config) in &preset.configs {
         if let Err(error) = fan_control.set_config(*fan_index, config.clone(), &fans, writer) {
-            warn_log!("[mac-fan-ctrl] Failed to restore fan {fan_index}: {error}");
+            warn_log!("[fanguard] Failed to restore fan {fan_index}: {error}");
         }
     }
 
-    debug_log!("[mac-fan-ctrl] Preset '{preset_name}' restored successfully");
+    debug_log!("[fanguard] Preset '{preset_name}' restored successfully");
+}
+
+fn check_temperature_alerts(
+    app_handle: &tauri::AppHandle,
+    sensor_data: &smc::SensorData,
+    last_alert_time: &mut Option<Instant>,
+) {
+    let state = app_handle.state::<AppState>();
+    let config = match state.alert_config.lock() {
+        Ok(c) => c.clone(),
+        Err(_) => return,
+    };
+
+    if !config.enabled {
+        return;
+    }
+
+    let cpu_temp = sensor_data
+        .summary
+        .cpu_package
+        .as_ref()
+        .and_then(|s| s.value);
+
+    let Some(temp) = cpu_temp else {
+        return;
+    };
+
+    let is_over_threshold = temp >= config.cpu_threshold;
+
+    if !is_over_threshold {
+        return;
+    }
+
+    // Check cooldown
+    let cooldown = Duration::from_secs(config.cooldown_secs);
+    if let Some(last) = last_alert_time {
+        if last.elapsed() < cooldown {
+            return;
+        }
+    }
+
+    warn_log!(
+        "[fanguard] ALERT: CPU temp {temp:.1}°C >= {:.1}°C threshold",
+        config.cpu_threshold
+    );
+
+    // Fire native notification
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app_handle
+        .notification()
+        .builder()
+        .title("High Temperature Warning")
+        .body(format!(
+            "CPU temperature is {temp:.0}°C (threshold: {:.0}°C)",
+            config.cpu_threshold
+        ))
+        .show();
+
+    *last_alert_time = Some(Instant::now());
+}
+
+/// Shared helper: apply a named preset to all fans.
+/// Used by both tray preset selection and power source auto-switch.
+pub fn apply_preset_by_name(app_handle: &tauri::AppHandle, preset_name: &str) {
+    let state = app_handle.state::<AppState>();
+
+    let writer_guard = match state.smc_writer.lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    let Some(writer) = writer_guard.as_deref() else {
+        return;
+    };
+
+    let mut service = smc::SensorService::new();
+    let fans = service.read_fans_only().unwrap_or_default();
+    let fan_indices: Vec<u8> = fans.iter().map(|f| f.index).collect();
+    let fan_maxes: std::collections::HashMap<u8, f32> =
+        fans.iter().map(|f| (f.index, f.max)).collect();
+
+    let mut store = match state.preset_store.lock() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let all = presets::all_presets(&store, &fan_indices, &fan_maxes);
+    let Some(preset) = all.into_iter().find(|p| p.name == preset_name) else {
+        warn_log!("[fanguard] Preset '{preset_name}' not found — cannot apply");
+        return;
+    };
+
+    let mut control = match state.fan_control.lock() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    control.restore_all_auto(writer);
+    for (fan_index, config) in &preset.configs {
+        let _ = control.set_config(*fan_index, config.clone(), &fans, writer);
+    }
+
+    store.active_preset = Some(preset_name.to_string());
+    let _ = presets::save_preset_store(&store);
+    debug_log!("[fanguard] Applied preset '{preset_name}'");
+}
+
+fn check_power_source_change(
+    app_handle: &tauri::AppHandle,
+    last_power_source: &mut PowerSource,
+) {
+    let current = power_monitor::current_power_source();
+    if current == *last_power_source {
+        return;
+    }
+
+    let previous = *last_power_source;
+    *last_power_source = current;
+
+    debug_log!("[fanguard] Power source changed: {previous} -> {current}");
+
+    // Update stored state
+    let state = app_handle.state::<AppState>();
+    if let Ok(mut stored) = state.current_power_source.lock() {
+        *stored = current;
+    }
+
+    // Emit event to frontend
+    let _ = app_handle.emit("power_source_changed", current);
+
+    // Auto-apply configured preset
+    let config = match state.power_preset_config.lock() {
+        Ok(c) => c.clone(),
+        Err(_) => return,
+    };
+
+    if !config.enabled {
+        return;
+    }
+
+    let preset_name = match current {
+        PowerSource::Ac => config.ac_preset,
+        PowerSource::Battery => config.battery_preset,
+        PowerSource::Unknown => None,
+    };
+
+    if let Some(name) = preset_name {
+        debug_log!("[fanguard] Auto-switching to preset '{name}' for {current}");
+        apply_preset_by_name(app_handle, &name);
+    }
 }
 
 fn start_sensor_stream(app_handle: tauri::AppHandle) {
@@ -138,6 +374,8 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
         let full_read_every = 3; // Do a full sensor read every Nth cycle
         let mut cycle_count: u32 = 0;
         let mut last_full_data: Option<smc::SensorData> = None;
+        let mut last_alert_time: Option<Instant> = None;
+        let mut last_power_source = power_monitor::current_power_source();
 
         loop {
             let cycle_start = Instant::now();
@@ -148,12 +386,14 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
                 match service.read_all_sensors() {
                     Ok(mut sensor_data) => {
                         run_fan_control_tick(&app_handle, &mut sensor_data);
+                        check_temperature_alerts(&app_handle, &sensor_data, &mut last_alert_time);
+                        check_power_source_change(&app_handle, &mut last_power_source);
 
                         debug_log!("[stream] cycle={cycle_count} emit(full)");
                         if let Err(error) =
                             app_handle.emit(commands::SENSOR_UPDATE_EVENT, &sensor_data)
                         {
-                            warn_log!("[mac-fan-ctrl] Failed to emit sensor_update event: {error}");
+                            warn_log!("[fanguard] Failed to emit sensor_update event: {error}");
                         }
 
                         // Full tray update: temperature title + menu rebuild
@@ -164,13 +404,13 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
                         last_full_data = Some(sensor_data);
                     }
                     Err(error) => {
-                        warn_log!("[mac-fan-ctrl] Sensor stream read failed: {error}");
+                        warn_log!("[fanguard] Sensor stream read failed: {error}");
                         service = smc::SensorService::new();
                     }
                 }
             } else if let Some(ref mut cached) = last_full_data {
                 // Fast path: only re-read fan data (~10 key reads, <50ms)
-                let fresh_fans = service.read_fans_only();
+                let fresh_fans = service.read_fans_only().unwrap_or_default();
                 if !fresh_fans.is_empty() {
                     cached.fans = fresh_fans;
                 }
@@ -179,7 +419,7 @@ fn start_sensor_stream(app_handle: tauri::AppHandle) {
 
                 debug_log!("[stream] cycle={cycle_count} emit(fast)");
                 if let Err(error) = app_handle.emit(commands::SENSOR_UPDATE_EVENT, &*cached) {
-                    warn_log!("[mac-fan-ctrl] Failed to emit sensor_update event: {error}");
+                    warn_log!("[fanguard] Failed to emit sensor_update event: {error}");
                 }
 
                 // Fast tray update: temperature title only
@@ -208,7 +448,7 @@ fn restore_fans(app_handle: &tauri::AppHandle) {
     let Ok(mut control) = state.fan_control.lock() else {
         return;
     };
-    warn_log!("[mac-fan-ctrl] Restoring all fans to Auto");
+    warn_log!("[fanguard] Restoring all fans to Auto");
     control.restore_all_auto(writer);
 }
 
@@ -230,7 +470,7 @@ fn recover_orphaned_fan_modes(app_handle: &tauri::AppHandle) {
     };
 
     let mut service = smc::SensorService::new();
-    let fans = service.read_fans_only();
+    let fans = service.read_fans_only().unwrap_or_default();
 
     let orphaned: Vec<u8> = fans
         .iter()
@@ -243,24 +483,27 @@ fn recover_orphaned_fan_modes(app_handle: &tauri::AppHandle) {
     }
 
     warn_log!(
-        "[mac-fan-ctrl] RECOVERY: Found {} orphaned fan(s) in Forced mode: {:?}",
+        "[fanguard] RECOVERY: Found {} orphaned fan(s) in Forced mode: {:?}",
         orphaned.len(),
         orphaned
     );
 
     for fan_index in &orphaned {
         match writer.set_fan_auto(*fan_index) {
-            Ok(()) => warn_log!("[mac-fan-ctrl] RECOVERY: Fan {fan_index} restored to Auto"),
-            Err(e) => warn_log!("[mac-fan-ctrl] RECOVERY: Failed to restore fan {fan_index}: {e}"),
+            Ok(()) => warn_log!("[fanguard] RECOVERY: Fan {fan_index} restored to Auto"),
+            Err(e) => warn_log!("[fanguard] RECOVERY: Failed to restore fan {fan_index}: {e}"),
         }
     }
 
     let _ = writer.lock_fan_control();
-    warn_log!("[mac-fan-ctrl] RECOVERY: Thermal enforcement re-locked");
+    warn_log!("[fanguard] RECOVERY: Thermal enforcement re-locked");
 }
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .setup(|app| {
             bootstrap_menu_bar(app);
@@ -274,29 +517,23 @@ fn main() {
                     app.manage(commands::TrayHandle(tray_icon));
                 }
                 Err(e) => {
-                    warn_log!("[mac-fan-ctrl] Tray setup failed: {e}");
+                    warn_log!("[fanguard] Tray setup failed: {e}");
                 }
             }
 
-            // Hide Dock icon — app lives in the menu bar
+            // Start with Regular policy so the app appears in Cmd+Tab.
+            // Switch to Accessory when the user hides to menu bar.
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-
-            // Bring window to front after Accessory policy change
-            // (macOS deactivates the app when removing its dock icon)
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
 
             // Register signal handler for SIGTERM/SIGINT
             let signal_handle = app.handle().clone();
             ctrlc::set_handler(move || {
-                warn_log!("[mac-fan-ctrl] Signal received — restoring fans to Auto");
+                warn_log!("[fanguard] Signal received — restoring fans to Auto");
                 restore_fans(&signal_handle);
             })
             .unwrap_or_else(|e| {
-                warn_log!("[mac-fan-ctrl] Signal handler registration failed: {e}");
+                warn_log!("[fanguard] Signal handler registration failed: {e}");
             });
 
             start_sensor_stream(app.handle().clone());
@@ -304,6 +541,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::ping_backend,
+            commands::get_app_info,
             commands::get_sensors,
             commands::set_fan_constant_rpm,
             commands::set_fan_sensor_control,
@@ -320,12 +558,28 @@ fn main() {
             commands::open_url,
             commands::set_tray_display_mode,
             commands::get_tray_display_mode,
+            commands::get_alert_config,
+            commands::set_alert_config,
+            commands::get_power_preset_config,
+            commands::set_power_preset_config,
+            commands::get_current_power_source,
+            commands::hide_to_menu_bar,
+            commands::install_helper,
+            commands::reconnect_writer,
         ])
+        .on_menu_event(|app_handle, event| {
+            if event.id().as_ref() == "app_quit" {
+                show_quit_confirmation(app_handle);
+            }
+        })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 // Hide to tray instead of closing
                 api.prevent_close();
                 let _ = window.hide();
+                // Remove from Dock + Cmd+Tab when hidden
+                #[cfg(target_os = "macos")]
+                let _ = window.app_handle().set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
             tauri::WindowEvent::Destroyed => {
                 restore_fans(window.app_handle());
@@ -334,9 +588,11 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = &event {
-                restore_fans(app_handle);
+        .run(|_app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                if !EXIT_CONFIRMED.load(Ordering::SeqCst) {
+                    api.prevent_exit();
+                }
             }
         });
 }

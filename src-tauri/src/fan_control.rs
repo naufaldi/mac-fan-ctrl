@@ -115,7 +115,7 @@ impl FanControlState {
         if total_sensor_failure {
             if !self.emergency_active {
                 warn_log!(
-                    "[mac-fan-ctrl] EMERGENCY: total sensor failure (0 readable temperature sensors) — forcing all fans to max"
+                    "[fanguard] EMERGENCY: total sensor failure (0 readable temperature sensors) — forcing all fans to max"
                 );
                 self.emergency_active = true;
                 force_all_fans_max(fans, writer)?;
@@ -128,7 +128,7 @@ impl FanControlState {
         if max_temp >= EMERGENCY_TEMP_THRESHOLD {
             if !self.emergency_active {
                 warn_log!(
-                    "[mac-fan-ctrl] EMERGENCY: {max_temp:.1}°C >= {EMERGENCY_TEMP_THRESHOLD}°C — forcing all fans to max"
+                    "[fanguard] EMERGENCY: {max_temp:.1}°C >= {EMERGENCY_TEMP_THRESHOLD}°C — forcing all fans to max"
                 );
                 self.emergency_active = true;
                 force_all_fans_max(fans, writer)?;
@@ -139,7 +139,7 @@ impl FanControlState {
         // If emergency was active but temps dropped below clear threshold (hysteresis), restore configs
         if self.emergency_active && max_temp < EMERGENCY_CLEAR_THRESHOLD {
             warn_log!(
-                "[mac-fan-ctrl] Emergency cleared: {max_temp:.1}°C < {EMERGENCY_CLEAR_THRESHOLD}°C — restoring configs"
+                "[fanguard] Emergency cleared: {max_temp:.1}°C < {EMERGENCY_CLEAR_THRESHOLD}°C — restoring configs"
             );
             self.emergency_active = false;
             self.sensor_miss_counts.clear();
@@ -178,7 +178,7 @@ impl FanControlState {
 
                         if *misses >= SENSOR_MISS_LIMIT {
                             warn_log!(
-                                "[mac-fan-ctrl] SAFETY: sensor '{sensor_key}' missing for {misses} cycles on fan {fan_index} — forcing fan to max RPM"
+                                "[fanguard] SAFETY: sensor '{sensor_key}' missing for {misses} cycles on fan {fan_index} — forcing fan to max RPM"
                             );
                             if let Some(fan) = fans.iter().find(|f| f.index == *fan_index) {
                                 let _ = writer.set_fan_target_rpm(*fan_index, fan.max, fan.min, fan.max);
@@ -223,7 +223,7 @@ impl FanControlState {
     pub fn restore_all_auto(&mut self, writer: &dyn SmcWriteApi) {
         for fan_index in self.configs.keys() {
             if let Err(error) = writer.set_fan_auto(*fan_index) {
-                warn_log!("[mac-fan-ctrl] Failed to restore fan {fan_index} to auto: {error}");
+                warn_log!("[fanguard] Failed to restore fan {fan_index} to auto: {error}");
             }
         }
         self.configs.clear();

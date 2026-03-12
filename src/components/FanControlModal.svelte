@@ -4,15 +4,16 @@ import { fade, scale } from "svelte/transition";
 import { cn } from "$lib/cn";
 import { getFanControlSensors } from "$lib/sensorListPaneState";
 import { requestPrivilegeRestart, setFanConstantRpm, setFanSensorControl } from "$lib/tauriCommands";
-import type { FanData, Sensor } from "$lib/types";
+import type { FanControlConfig, FanData, Sensor } from "$lib/types";
 
 interface Props {
 	fan: FanData;
 	sensors: Sensor[];
+	currentConfig?: FanControlConfig;
 	onclose: () => void;
 }
 
-const { fan, sensors, onclose }: Props = $props();
+const { fan, sensors, currentConfig, onclose }: Props = $props();
 
 // Filter to sensors relevant for fan control decisions
 const tempSensors = $derived(getFanControlSensors(sensors));
@@ -21,11 +22,35 @@ const tempSensors = $derived(getFanControlSensors(sensors));
 
 type ControlMode = "constant_rpm" | "sensor_based";
 
-let selectedMode: ControlMode = $state("constant_rpm");
-let constantRpm: number = $state(untrack(() => Math.round(fan.min + (fan.max - fan.min) / 2)));
-let selectedSensorKey: string = $state(untrack(() => getFanControlSensors(sensors)[0]?.key ?? ""));
-let tempLow: number = $state(40);
-let tempHigh: number = $state(90);
+let selectedMode: ControlMode = $state(
+	untrack(() =>
+		currentConfig?.mode === "sensor_based"
+			? "sensor_based"
+			: "constant_rpm"
+	)
+);
+let constantRpm: number = $state(
+	untrack(() =>
+		currentConfig?.mode === "constant_rpm"
+			? currentConfig.target_rpm
+			: fan.mode === "forced"
+				? Math.round(fan.target)
+				: Math.round(fan.min + (fan.max - fan.min) / 2)
+	)
+);
+let selectedSensorKey: string = $state(
+	untrack(() =>
+		currentConfig?.mode === "sensor_based"
+			? currentConfig.sensor_key
+			: getFanControlSensors(sensors)[0]?.key ?? ""
+	)
+);
+let tempLow: number = $state(
+	untrack(() => currentConfig?.mode === "sensor_based" ? currentConfig.temp_low : 40)
+);
+let tempHigh: number = $state(
+	untrack(() => currentConfig?.mode === "sensor_based" ? currentConfig.temp_high : 85)
+);
 let isSubmitting: boolean = $state(false);
 let errorMessage: string = $state("");
 let extremeWarningAcknowledged: boolean = $state(false);
