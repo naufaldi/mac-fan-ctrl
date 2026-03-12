@@ -228,14 +228,16 @@ const dropdownItemClass =
               {#if preset.name === activePresetName}
                 <span class="text-[10px]">✓</span>
               {/if}
-              <button
-                type="button"
+              <span
+                role="button"
+                tabindex="0"
                 class="text-[10px] text-gray-400 hover:text-red-500 px-1 cursor-pointer"
                 onclick={(e) => handleDeletePreset(preset.name, e)}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleDeletePreset(preset.name, e); }}
                 aria-label={`Delete preset ${preset.name}`}
               >
                 ✕
-              </button>
+              </span>
             </span>
           </button>
         {/each}
