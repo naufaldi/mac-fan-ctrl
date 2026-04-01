@@ -492,21 +492,42 @@ impl SmcWriter {
         let bytes = encode_value(rpm, key_info.data_type, key_info.data_size)?;
         self.write_key_bytes(key, key_info.data_size, &bytes)?;
 
-        // Verify write persisted after SMC settles (immediate reads may show stale data)
-        std::thread::sleep(Duration::from_millis(100));
-        match self.read_key_bytes(key, key_info.data_size) {
-            Ok(readback) => {
-                let readback_rpm = decode_rpm(&readback, &type_bytes);
-                let diff = (readback_rpm - rpm).abs();
-                if diff > 50.0 {
-                    debug_log!(
-                        "[smc_writer] WARNING: F{fan_index}Tg write did not persist — wrote={rpm:.0} readback={readback_rpm:.0}"
-                    );
-                } else {
-                    debug_log!("[smc_writer] F{fan_index}Tg verified: {readback_rpm:.0} RPM");
+        // Verify write persisted after SMC settles, with retry on mismatch
+        const MAX_VERIFY_ATTEMPTS: u8 = 3;
+        const VERIFY_TOLERANCE: f64 = 50.0;
+
+        let mut verified = false;
+        let mut attempt = 0u8;
+
+        while attempt < MAX_VERIFY_ATTEMPTS && !verified {
+            std::thread::sleep(Duration::from_millis(100));
+            match self.read_key_bytes(key, key_info.data_size) {
+                Ok(readback) => {
+                    let readback_rpm = decode_rpm(&readback, &type_bytes);
+                    let diff = (readback_rpm - rpm).abs();
+                    if diff > VERIFY_TOLERANCE as f32 {
+                        debug_log!(
+                            "[smc_writer] F{fan_index}Tg verify attempt {}/{MAX_VERIFY_ATTEMPTS}: wrote={rpm:.0} readback={readback_rpm:.0} (diff={diff:.0})"
+                            , attempt + 1
+                        );
+                        // Retry the write
+                        if attempt + 1 < MAX_VERIFY_ATTEMPTS {
+                            let _ = self.write_key_bytes(key, key_info.data_size, &bytes);
+                        }
+                    } else {
+                        debug_log!("[smc_writer] F{fan_index}Tg verified: {readback_rpm:.0} RPM");
+                        verified = true;
+                    }
                 }
+                Err(e) => debug_log!("[smc_writer] F{fan_index}Tg readback failed (attempt {}): {e}", attempt + 1),
             }
-            Err(e) => debug_log!("[smc_writer] F{fan_index}Tg readback failed: {e}"),
+            attempt += 1;
+        }
+
+        if !verified {
+            warn_log!(
+                "[smc_writer] F{fan_index}Tg write verification failed after {MAX_VERIFY_ATTEMPTS} attempts — RPM may not have been applied"
+            );
         }
 
         debug_log!("[smc_writer] set_fan_target_rpm: done fan={fan_index} rpm={rpm}");
@@ -554,8 +575,10 @@ impl SmcWriter {
 
         match &result {
             Ok(()) => {
-                let final_mode = self.read_fan_mode(fan_index).unwrap_or(255);
-                debug_log!("[smc_writer] wait_for_system_mode_handoff: OK after {poll_count} polls, final mode={final_mode}");
+                match self.read_fan_mode(fan_index) {
+                    Ok(final_mode) => debug_log!("[smc_writer] wait_for_system_mode_handoff: OK after {poll_count} polls, final mode={final_mode}"),
+                    Err(e) => debug_log!("[smc_writer] wait_for_system_mode_handoff: OK after {poll_count} polls, but mode readback failed: {e}"),
+                }
             }
             Err(e) => debug_log!("[smc_writer] wait_for_system_mode_handoff: FAILED after {poll_count} polls: {e}"),
         }

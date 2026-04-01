@@ -4,11 +4,13 @@ import { cn } from "$lib/cn";
 import type { SensorData as DesignTokenSensor } from "$lib/designTokens";
 import {
 	getPrivilegeStatus,
+	getTrayDisplayMode,
 	hideToMenuBar,
 	installHelper,
 	listenCheckForUpdates,
 	listenShowAbout,
 	reconnectWriter,
+	setTrayDisplayMode,
 } from "$lib/tauriCommands";
 import type { SensorData } from "$lib/types";
 import AboutDialog from "./AboutDialog.svelte";
@@ -64,6 +66,8 @@ let showAbout: boolean = $state(false);
 let showUpdate: boolean = $state(false);
 let alwaysOnTop: boolean = $state(false);
 
+let trayDisplayMode: number = $state(0);
+
 async function handleAlwaysOnTop(): Promise<void> {
 	try {
 		const next = !alwaysOnTop;
@@ -102,8 +106,22 @@ async function handleHideToMenuBar(): Promise<void> {
 	}
 }
 
-function handlePreferences(): void {
+async function handlePreferences(): Promise<void> {
+	try {
+		trayDisplayMode = await getTrayDisplayMode();
+	} catch {
+		trayDisplayMode = 0;
+	}
 	showPreferences = true;
+}
+
+async function handleTrayModeChange(mode: number): Promise<void> {
+	trayDisplayMode = mode;
+	try {
+		await setTrayDisplayMode(mode);
+	} catch (error) {
+		console.error("[DesktopDashboard] Failed to set tray display mode:", error);
+	}
 }
 
 const chromeButtonClass =
@@ -192,3 +210,70 @@ const chromeButtonClass =
     <UpdateDialog onclose={() => { showUpdate = false; }} />
   {/if}
 </section>
+
+<!-- Preferences modal -->
+{#if showPreferences}
+  <div class={cn('fixed inset-0 z-50 flex items-center justify-center')}>
+    <button
+      type="button"
+      class={cn('absolute inset-0 bg-black/30 cursor-default')}
+      onclick={() => { showPreferences = false; }}
+      aria-label="Close preferences"
+      tabindex="-1"
+    ></button>
+    <div
+      class={cn(
+        'relative w-[340px] rounded-lg border border-gray-300 dark:border-[#4a4a4a] bg-[#ececec] dark:bg-[#2d2d2d] shadow-2xl'
+      )}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Preferences"
+    >
+      <div class={cn('px-6 pt-5 pb-4')}>
+        <h2 class={cn('text-[13px] font-semibold text-(--text-primary) mb-4')}>Preferences</h2>
+
+        <div class={cn('space-y-3')}>
+          <div>
+            <p class={cn('text-[12px] font-medium text-(--text-primary) mb-2')}>Menu bar display</p>
+            <div class={cn('flex gap-0 rounded-[5px] border border-gray-300 dark:border-[#4a4a4a] overflow-hidden')}>
+              <button
+                type="button"
+                class={cn(
+                  'flex-1 px-3 py-1.5 text-[12px] transition-colors',
+                  trayDisplayMode === 0
+                    ? 'bg-blue-500 text-white font-medium'
+                    : 'bg-white dark:bg-[#3a3a3a] text-(--text-primary) hover:bg-gray-50 dark:hover:bg-[#444]'
+                )}
+                onclick={() => handleTrayModeChange(0)}
+              >
+                CPU Temperature
+              </button>
+              <button
+                type="button"
+                class={cn(
+                  'flex-1 px-3 py-1.5 text-[12px] border-l border-gray-300 dark:border-[#4a4a4a] transition-colors',
+                  trayDisplayMode === 1
+                    ? 'bg-blue-500 text-white font-medium'
+                    : 'bg-white dark:bg-[#3a3a3a] text-(--text-primary) hover:bg-gray-50 dark:hover:bg-[#444]'
+                )}
+                onclick={() => handleTrayModeChange(1)}
+              >
+                Fan RPM
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class={cn('flex justify-end px-6 pb-5')}>
+        <button
+          type="button"
+          class="rounded-[5px] border border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#3a3a3a] px-4 py-1.5 text-[12px] text-(--text-primary) shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-gray-50 dark:hover:bg-[#444]"
+          onclick={() => { showPreferences = false; }}
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
