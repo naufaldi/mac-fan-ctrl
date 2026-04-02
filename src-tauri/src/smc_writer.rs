@@ -86,6 +86,12 @@ const FAN_MODE_SYSTEM: u8 = 3;
 const MODE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MODE_TRANSITION_RETRY_COUNT: u32 = 100;
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum FanModeCapability {
+    Managed,
+    Absent,
+}
+
 #[link(name = "IOKit", kind = "framework")]
 extern "C" {
     fn IOServiceMatching(name: *const u8) -> CFMutableDictionaryRef;
@@ -473,12 +479,21 @@ impl SmcWriter {
             }
         }
 
-        self.wait_for_system_mode_handoff(fan_index)?;
+        let mode_capability =
+            detect_fan_mode_capability(self.read_key_info(fan_key(fan_index, b"Md")))?;
 
-        // Step 2: Set forced mode
-        debug_log!("[smc_writer] Setting F{fan_index}Md=1 (forced)");
-        self.set_fan_mode(fan_index, true)?;
-        self.verify_mode_allows_target_write(fan_index)?;
+        if mode_capability == FanModeCapability::Managed {
+            self.wait_for_system_mode_handoff(fan_index)?;
+
+            // Step 2: Set forced mode
+            debug_log!("[smc_writer] Setting F{fan_index}Md=1 (forced)");
+            self.set_fan_mode(fan_index, true)?;
+            self.verify_mode_allows_target_write(fan_index)?;
+        } else {
+            debug_log!(
+                "[smc_writer] F{fan_index}Md key absent — skipping mode transition and writing F{fan_index}Tg directly"
+            );
+        }
 
         // Step 3: Write target RPM
         let key = fan_key(fan_index, b"Tg");
@@ -539,7 +554,15 @@ impl SmcWriter {
     /// no fans remain in forced mode.
     fn set_fan_auto_impl(&self, fan_index: u8) -> Result<(), SmcWriteError> {
         debug_log!("[smc_writer] set_fan_auto: fan={fan_index}");
-        self.set_fan_mode(fan_index, false)
+        let mode_capability =
+            detect_fan_mode_capability(self.read_key_info(fan_key(fan_index, b"Md")))?;
+
+        if mode_capability == FanModeCapability::Managed {
+            self.set_fan_mode(fan_index, false)
+        } else {
+            debug_log!("[smc_writer] F{fan_index}Md key absent — no auto mode to restore");
+            Ok(())
+        }
     }
 
     /// Sets the fan mode flag: `false` = Auto, `true` = Forced.
@@ -834,6 +857,16 @@ fn validate_mode_allows_target_write(actual_mode: u8) -> Result<(), SmcWriteErro
     }
 }
 
+fn detect_fan_mode_capability(
+    mode_key_info: Result<SmcKeyDataKeyInfo, SmcWriteError>,
+) -> Result<FanModeCapability, SmcWriteError> {
+    match mode_key_info {
+        Ok(_) => Ok(FanModeCapability::Managed),
+        Err(SmcWriteError::UnknownKey(_)) => Ok(FanModeCapability::Absent),
+        Err(error) => Err(error),
+    }
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 // ── Test mock ────────────────────────────────────────────────────────────────
@@ -1030,5 +1063,85 @@ mod tests {
                 actual: FAN_MODE_SYSTEM,
             })
         ));
+    }
+
+    #[test]
+    fn detect_fan_mode_capability_uses_mode_control_when_key_exists() {
+        let result = detect_fan_mode_capability(Ok(SmcKeyDataKeyInfo::default()));
+
+        assert!(matches!(result, Ok(FanModeCapability::Managed)));
+    }
+
+    #[test]
+    fn detect_fan_mode_capability_skips_mode_control_when_key_is_missing() {
+        let result = detect_fan_mode_capability(Err(SmcWriteError::UnknownKey("F0Md".to_string())));
+
+        assert!(matches!(result, Ok(FanModeCapability::Absent)));
+    }
+
+    #[test]
+    fn detect_fan_mode_capability_propagates_non_missing_errors() {
+        let result = detect_fan_mode_capability(Err(SmcWriteError::InsufficientPrivileges));
+
+        assert!(matches!(result, Err(SmcWriteError::InsufficientPrivileges)));
+    }
+
+    #[test]
+    #[ignore = "hardware-dependent smoke test for Apple Silicon Macs without F*Md"]
+    fn writes_target_rpm_when_mode_key_is_missing() {
+        let writer = SmcWriter::new().expect("SMC writer should connect on supported Macs");
+        let fan_index = 0;
+        let mode_capability =
+            detect_fan_mode_capability(writer.read_key_info(fan_key(fan_index, b"Md")));
+
+        if !matches!(mode_capability, Ok(FanModeCapability::Absent)) {
+            return;
+        }
+
+        let target_info = writer
+            .read_key_info(fan_key(fan_index, b"Tg"))
+            .expect("target key should exist");
+        let target_type = target_info.data_type.to_be_bytes();
+        let target_bytes = writer
+            .read_key_bytes(fan_key(fan_index, b"Tg"), target_info.data_size)
+            .expect("target value should be readable");
+        let current_target = decode_rpm(&target_bytes, &target_type);
+
+        let min_info = writer
+            .read_key_info(fan_key(fan_index, b"Mn"))
+            .expect("min key should exist");
+        let min_type = min_info.data_type.to_be_bytes();
+        let min_bytes = writer
+            .read_key_bytes(fan_key(fan_index, b"Mn"), min_info.data_size)
+            .expect("min value should be readable");
+        let min_rpm = decode_rpm(&min_bytes, &min_type);
+
+        let max_info = writer
+            .read_key_info(fan_key(fan_index, b"Mx"))
+            .expect("max key should exist");
+        let max_type = max_info.data_type.to_be_bytes();
+        let max_bytes = writer
+            .read_key_bytes(fan_key(fan_index, b"Mx"), max_info.data_size)
+            .expect("max value should be readable");
+        let max_rpm = decode_rpm(&max_bytes, &max_type);
+        let safe_target = current_target.clamp(min_rpm, max_rpm);
+
+        writer
+            .set_fan_target_rpm_impl(fan_index, safe_target, min_rpm, max_rpm)
+            .expect("target write should succeed without F*Md");
+
+        let readback = writer
+            .read_key_bytes(fan_key(fan_index, b"Tg"), target_info.data_size)
+            .expect("target readback should succeed");
+        let readback_rpm = decode_rpm(&readback, &target_type);
+
+        assert!(
+            (readback_rpm - safe_target).abs() <= 50.0,
+            "expected target readback near {safe_target}, got {readback_rpm}"
+        );
+
+        writer
+            .set_fan_auto_impl(fan_index)
+            .expect("auto should be a no-op when F*Md is absent");
     }
 }

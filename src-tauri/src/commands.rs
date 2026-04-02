@@ -36,10 +36,20 @@ pub struct AppState {
     pub current_power_source: Mutex<PowerSource>,
 }
 
+fn should_try_direct_smc_writer(euid: u32) -> bool {
+    euid == 0
+}
+
 impl AppState {
     pub fn new() -> Self {
-        let writer: Option<Box<dyn SmcWriteApi>> = SmcWriter::new()
-            .map(|w| Box::new(w) as Box<dyn SmcWriteApi>)
+        let euid = unsafe { libc::geteuid() };
+        let direct_writer = if should_try_direct_smc_writer(euid) {
+            SmcWriter::new().map(|w| Box::new(w) as Box<dyn SmcWriteApi>)
+        } else {
+            Err(crate::smc_writer::SmcWriteError::InsufficientPrivileges)
+        };
+
+        let writer: Option<Box<dyn SmcWriteApi>> = direct_writer
             .or_else(|direct_err| {
                 warn_log!(
                     "[fanguard] Direct SMC writer failed: {direct_err} — trying socket client"
@@ -611,14 +621,11 @@ pub fn install_helper() -> Result<String, String> {
 </plist>"#
     );
 
-    // Build shell commands for osascript
-    let shell_commands = format!(
-        "mkdir -p '{}' && cp '{}' '{}' && chmod 755 '{}' && chown root:wheel '{}' && /bin/cat > '{}' << 'PLISTEOF'\n{}\nPLISTEOF\nchown root:wheel '{}' && chmod 644 '{}' && launchctl bootout system/{} 2>/dev/null; launchctl bootstrap system '{}'",
-        HELPER_INSTALL_DIR,
-        helper_binary.to_string_lossy(), install_path, install_path, install_path,
-        plist_path, plist_content,
-        plist_path, plist_path,
-        DAEMON_LABEL, plist_path
+    let shell_commands = build_helper_install_shell_commands(
+        &helper_binary,
+        &install_path,
+        &plist_path,
+        &plist_content,
     );
 
     let script = format!(
@@ -649,6 +656,23 @@ pub fn install_helper() -> Result<String, String> {
     }
 
     Err("Helper installed but socket not found after 5 seconds".to_string())
+}
+
+fn build_helper_install_shell_commands(
+    helper_binary: &std::path::Path,
+    install_path: &str,
+    plist_path: &str,
+    plist_content: &str,
+) -> String {
+    format!(
+        "mkdir -p '{helper_dir}' && cp '{helper_binary}' '{install_path}' && chmod 755 '{install_path}' && chown root:wheel '{install_path}' && /bin/cat > '{plist_path}' << 'PLISTEOF'\n{plist_content}\nPLISTEOF\nchown root:wheel '{plist_path}' && chmod 644 '{plist_path}' && launchctl bootout system '{plist_path}' 2>/dev/null || true\nlaunchctl enable system/{label}\nlaunchctl bootstrap system '{plist_path}'\nlaunchctl kickstart -k system/{label}",
+        helper_dir = HELPER_INSTALL_DIR,
+        helper_binary = helper_binary.to_string_lossy(),
+        install_path = install_path,
+        plist_path = plist_path,
+        plist_content = plist_content,
+        label = DAEMON_LABEL,
+    )
 }
 
 fn find_helper_binary(exe_path: &std::path::Path) -> Result<std::path::PathBuf, String> {
@@ -686,7 +710,11 @@ pub fn reconnect_writer(state: State<'_, AppState>) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::ping_backend;
+    use super::{
+        build_helper_install_shell_commands, ping_backend, should_try_direct_smc_writer,
+        DAEMON_LABEL, HELPER_INSTALL_DIR, LAUNCHDAEMON_DIR,
+    };
+    use std::path::Path;
 
     #[test]
     fn ping_backend_returns_expected_payload() {
@@ -699,5 +727,32 @@ mod tests {
     fn ping_backend_rejects_empty_message() {
         let result = ping_backend(String::new());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn should_try_direct_smc_writer_when_running_as_root() {
+        assert!(should_try_direct_smc_writer(0));
+    }
+
+    #[test]
+    fn should_not_try_direct_smc_writer_when_running_unprivileged() {
+        assert!(!should_try_direct_smc_writer(501));
+    }
+
+    #[test]
+    fn helper_install_commands_enable_service_before_bootstrap() {
+        let helper_binary = Path::new("/tmp/fanguard-helper");
+        let install_path = format!("{HELPER_INSTALL_DIR}/{DAEMON_LABEL}");
+        let plist_path = format!("{LAUNCHDAEMON_DIR}/{DAEMON_LABEL}.plist");
+        let plist_content = "<plist />".to_string();
+
+        let commands = build_helper_install_shell_commands(
+            helper_binary,
+            &install_path,
+            &plist_path,
+            &plist_content,
+        );
+
+        assert!(commands.contains(&format!("launchctl enable system/{DAEMON_LABEL}")));
     }
 }
