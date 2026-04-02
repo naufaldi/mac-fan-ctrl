@@ -26,6 +26,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
+		"dev:prepare-helper": "\"$HOME/.cargo/bin/cargo\" build --manifest-path src-tauri/Cargo.toml --bin fanguard-helper",
 		"build": "vite build",
 		"preview": "vite preview",
 		"tauri": "tauri",
