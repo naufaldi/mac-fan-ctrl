@@ -98,15 +98,23 @@ Download from: https://github.com/naufaldi/mac-fan-ctrl/releases
 ```
 
 ### Homebrew
+
+Homebrew 5+ enforces tap trust for non-official taps (`$HOMEBREW_REQUIRE_TAP_TRUST`).
+Users must trust the tap once before install or upgrade:
+
 ```bash
 brew tap naufaldi/tap
+brew trust naufaldi/tap
 brew install --cask fanguard
 ```
 
 ### Upgrade via Homebrew
+
 ```bash
 brew upgrade --cask fanguard
 ```
+
+If upgrade is skipped with "tap trust is required", run `brew trust naufaldi/tap` first.
 
 ## Notes
 
