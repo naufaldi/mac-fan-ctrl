@@ -37,9 +37,18 @@ Download the latest `.dmg` from [Releases](https://github.com/naufaldi/mac-fan-c
 
 ### Homebrew
 
+Homebrew 5+ requires trusting third-party taps before install or upgrade:
+
 ```bash
 brew tap naufaldi/tap
+brew trust naufaldi/tap
 brew install --cask fanguard
+```
+
+Upgrade:
+
+```bash
+brew upgrade --cask fanguard
 ```
 
 ## Development
