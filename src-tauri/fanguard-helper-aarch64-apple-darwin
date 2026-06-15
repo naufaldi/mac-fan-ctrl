@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "fanguard-helper stub — rebuild with: cargo build --bin fanguard-helper" >&2
+exit 1

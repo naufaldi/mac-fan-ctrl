@@ -3,7 +3,12 @@ import { untrack } from "svelte";
 import { fade, scale } from "svelte/transition";
 import { cn } from "$lib/cn";
 import { getFanControlSensors } from "$lib/sensorListPaneState";
-import { requestPrivilegeRestart, setFanConstantRpm, setFanSensorControl } from "$lib/tauriCommands";
+import {
+	installHelper,
+	reconnectWriter,
+	setFanConstantRpm,
+	setFanSensorControl,
+} from "$lib/tauriCommands";
 import type { FanControlConfig, FanData, Sensor } from "$lib/types";
 
 interface Props {
@@ -114,19 +119,22 @@ async function handleSubmit(): Promise<void> {
 }
 
 const isPrivilegeError = $derived(
-	errorMessage.includes('root') || errorMessage.includes('privileges') || errorMessage.includes('not available')
+	errorMessage.includes("root") ||
+		errorMessage.includes("privileges") ||
+		errorMessage.includes("not available") ||
+		errorMessage.includes("Unknown key") ||
+		errorMessage.includes("privileged helper")
 );
 
-const isDevModeError = $derived(
-	errorMessage.includes('development mode') || errorMessage.includes('sudo pnpm')
-);
-
-async function handleRestartWithPrivileges(): Promise<void> {
+async function handleGrantAccess(): Promise<void> {
 	try {
-		await requestPrivilegeRestart();
+		await installHelper();
+		await reconnectWriter();
+		errorMessage = "";
+		await handleSubmit();
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
-		if (!msg.includes('cancelled') && !msg.includes('canceled')) {
+		if (!msg.includes("cancelled") && !msg.includes("canceled")) {
 			errorMessage = msg;
 		}
 	}
@@ -389,14 +397,18 @@ const extremeWarningMessage = $derived(
           role="alert"
           aria-live="assertive"
         >
-          <p class="text-red-500">{errorMessage}</p>
-          {#if isPrivilegeError && !isDevModeError}
+          <p class="text-red-500">
+            {isPrivilegeError
+              ? "Fan control needs a one-time setup after install. Grant access to install the privileged helper."
+              : errorMessage}
+          </p>
+          {#if isPrivilegeError}
             <button
               type="button"
               class={cn(buttonBase, 'min-h-[32px] border-amber-500 bg-amber-500 text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-amber-600')}
-              onclick={handleRestartWithPrivileges}
+              onclick={handleGrantAccess}
             >
-              Restart with Admin Privileges
+              Grant Access
             </button>
           {/if}
         </div>

@@ -30,7 +30,7 @@ const { fans, sensorData }: Props = $props();
 const rawFans = $derived(sensorData?.fans ?? []);
 const sensors = $derived(sensorData?.details ?? []);
 
-let hasWriteAccess: boolean = $state(true);
+let hasWriteAccess: boolean = $state(false);
 let bannerMessage: string = $state("Fan control requires elevated privileges.");
 
 $effect(() => {

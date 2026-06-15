@@ -36,22 +36,46 @@ pub struct AppState {
     pub current_power_source: Mutex<PowerSource>,
 }
 
+fn create_smc_writer() -> Option<Box<dyn SmcWriteApi>> {
+    let running_as_root = unsafe { libc::geteuid() } == 0;
+
+    if running_as_root {
+        match SmcWriter::new() {
+            Ok(writer) => {
+                debug_log!("[fanguard] Using direct SMC writer (running as root)");
+                return Some(Box::new(writer));
+            }
+            Err(error) => {
+                warn_log!("[fanguard] Direct SMC writer failed while running as root: {error}");
+            }
+        }
+    }
+
+    match SmcSocketClient::new() {
+        Ok(client) => {
+            debug_log!("[fanguard] Using privileged helper via socket");
+            return Some(Box::new(client));
+        }
+        Err(error) => {
+            debug_log!("[fanguard] Privileged helper not available: {error}");
+        }
+    }
+
+    if running_as_root {
+        return None;
+    }
+
+    // Unprivileged direct connections can open AppleSMC for reads but fan
+    // control keys (F*nMd) return "Unknown key" — do not use as a fallback.
+    warn_log!(
+        "[fanguard] Fan control disabled — install the privileged helper for write access"
+    );
+    None
+}
+
 impl AppState {
     pub fn new() -> Self {
-        let writer: Option<Box<dyn SmcWriteApi>> = SmcWriter::new()
-            .map(|w| Box::new(w) as Box<dyn SmcWriteApi>)
-            .or_else(|direct_err| {
-                warn_log!(
-                    "[fanguard] Direct SMC writer failed: {direct_err} — trying socket client"
-                );
-                SmcSocketClient::new()
-                    .map(|c| Box::new(c) as Box<dyn SmcWriteApi>)
-            })
-            .map_err(|e| {
-                warn_log!("[fanguard] Socket client also failed (fan control disabled): {e}");
-                e
-            })
-            .ok();
+        let writer = create_smc_writer();
 
         Self {
             fan_control: Mutex::new(FanControlState::new()),
@@ -132,7 +156,9 @@ pub fn set_fan_constant_rpm(
     let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
     let writer = writer_guard
         .as_deref()
-        .ok_or_else(|| "SMC writer not available — fan control requires root".to_string())?;
+        .ok_or_else(|| {
+            "Fan control unavailable — grant access to install the privileged helper".to_string()
+        })?;
 
     let mut service = SensorService::new();
     let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
@@ -181,7 +207,9 @@ pub fn set_fan_sensor_control(
     let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
     let writer = writer_guard
         .as_deref()
-        .ok_or_else(|| "SMC writer not available — fan control requires root".to_string())?;
+        .ok_or_else(|| {
+            "Fan control unavailable — grant access to install the privileged helper".to_string()
+        })?;
 
     let mut service = SensorService::new();
     let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
@@ -212,7 +240,9 @@ pub fn set_fan_auto(state: State<'_, AppState>, fan_index: u8) -> Result<(), Str
     let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
     let writer = writer_guard
         .as_deref()
-        .ok_or_else(|| "SMC writer not available — fan control requires root".to_string())?;
+        .ok_or_else(|| {
+            "Fan control unavailable — grant access to install the privileged helper".to_string()
+        })?;
 
     state
         .fan_control
@@ -257,7 +287,9 @@ pub fn apply_preset(state: State<'_, AppState>, name: String) -> Result<(), Stri
     let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
     let writer = writer_guard
         .as_deref()
-        .ok_or_else(|| "SMC writer not available — fan control requires root".to_string())?;
+        .ok_or_else(|| {
+            "Fan control unavailable — grant access to install the privileged helper".to_string()
+        })?;
 
     // Only need fan metadata — skip expensive temperature/ioreg reads
     let mut service = SensorService::new();

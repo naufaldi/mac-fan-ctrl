@@ -68,7 +68,9 @@ function isPrivilegeError(error: unknown): boolean {
 	return (
 		msg.includes("root") ||
 		msg.includes("privileges") ||
-		msg.includes("not available")
+		msg.includes("not available") ||
+		msg.includes("Unknown key") ||
+		msg.includes("privileged helper")
 	);
 }
 
