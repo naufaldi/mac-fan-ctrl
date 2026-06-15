@@ -36,8 +36,12 @@ pub struct AppState {
     pub current_power_source: Mutex<PowerSource>,
 }
 
+fn should_try_direct_smc_writer(euid: u32) -> bool {
+    euid == 0
+}
+
 fn create_smc_writer() -> Option<Box<dyn SmcWriteApi>> {
-    let running_as_root = unsafe { libc::geteuid() } == 0;
+    let running_as_root = should_try_direct_smc_writer(unsafe { libc::geteuid() });
 
     if running_as_root {
         match SmcWriter::new() {
