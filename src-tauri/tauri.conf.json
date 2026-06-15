@@ -1,7 +1,7 @@
 {
 	"$schema": "../node_modules/@tauri-apps/cli/schema.json",
 	"productName": "FanGuard",
-	"version": "0.1.0-beta.2",
+	"version": "0.1.0-beta.3",
 	"identifier": "io.github.naufaldi.fanguard",
 	"build": {
 		"beforeDevCommand": "pnpm run dev:prepare-helper && pnpm run dev",
@@ -23,6 +23,7 @@
 	},
 	"bundle": {
 		"active": true,
+		"externalBin": ["fanguard-helper"],
 		"icon": ["icons/icon.icns", "icons/icon.png"],
 		"macOS": {
 			"entitlements": "Entitlements.plist",
