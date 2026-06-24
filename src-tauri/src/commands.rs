@@ -16,10 +16,11 @@ use crate::smc_writer::{SmcWriteApi, SmcWriter};
 
 pub const SENSOR_UPDATE_EVENT: &str = "sensor_update";
 
-const HELPER_SOCKET: &str = "/var/run/fanguard.sock";
 const HELPER_INSTALL_DIR: &str = "/Library/PrivilegedHelperTools";
 const LAUNCHDAEMON_DIR: &str = "/Library/LaunchDaemons";
 const DAEMON_LABEL: &str = "io.github.naufaldi.fanguard.helper";
+const HELPER_READY_RETRY_COUNT: u8 = 20;
+const HELPER_READY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 
 // ── Tray handle wrapper ─────────────────────────────────────────────────────
 
@@ -673,15 +674,47 @@ pub fn install_helper() -> Result<String, String> {
         return Err(format!("Installation failed: {stderr}"));
     }
 
-    // Wait for socket to appear
-    for _ in 0..20 {
-        if std::path::Path::new(HELPER_SOCKET).exists() {
-            return Ok("Helper installed and running".to_string());
+    wait_for_helper_ready()?;
+    Ok("Helper installed and running".to_string())
+}
+
+fn wait_for_helper_ready() -> Result<(), String> {
+    wait_for_helper_ready_with(
+        HELPER_READY_RETRY_COUNT,
+        || {
+            SmcSocketClient::new()
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        },
+        || std::thread::sleep(HELPER_READY_RETRY_DELAY),
+    )
+}
+
+fn wait_for_helper_ready_with<FConnect, FSleep>(
+    attempts: u8,
+    mut connect: FConnect,
+    mut sleep: FSleep,
+) -> Result<(), String>
+where
+    FConnect: FnMut() -> Result<(), String>,
+    FSleep: FnMut(),
+{
+    let mut last_error = "helper did not respond".to_string();
+    for attempt in 0..attempts {
+        match connect() {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                last_error = error;
+                if attempt + 1 < attempts {
+                    sleep();
+                }
+            }
         }
-        std::thread::sleep(std::time::Duration::from_millis(250));
     }
 
-    Err("Helper installed but socket not found after 5 seconds".to_string())
+    Err(format!(
+        "Helper installed but socket was not reachable after 5 seconds: {last_error}"
+    ))
 }
 
 fn build_helper_install_shell_commands(
@@ -738,7 +771,7 @@ pub fn reconnect_writer(state: State<'_, AppState>) -> Result<bool, String> {
 mod tests {
     use super::{
         build_helper_install_shell_commands, ping_backend, should_try_direct_smc_writer,
-        DAEMON_LABEL, HELPER_INSTALL_DIR, LAUNCHDAEMON_DIR,
+        wait_for_helper_ready_with, DAEMON_LABEL, HELPER_INSTALL_DIR, LAUNCHDAEMON_DIR,
     };
     use std::path::Path;
 
@@ -780,5 +813,33 @@ mod tests {
         );
 
         assert!(commands.contains(&format!("launchctl enable system/{DAEMON_LABEL}")));
+    }
+
+    #[test]
+    fn helper_ready_wait_requires_successful_socket_ping() {
+        let mut attempts = 0u8;
+        let result = wait_for_helper_ready_with(
+            3,
+            || {
+                attempts += 1;
+                if attempts < 2 {
+                    Err("Permission denied".to_string())
+                } else {
+                    Ok(())
+                }
+            },
+            || {},
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(attempts, 2);
+    }
+
+    #[test]
+    fn helper_ready_wait_reports_last_socket_ping_error() {
+        let result = wait_for_helper_ready_with(2, || Err("Permission denied".to_string()), || {});
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Permission denied"));
     }
 }

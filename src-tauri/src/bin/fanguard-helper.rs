@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -7,6 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use fanguard_lib::smc_protocol::{HelperRequest, HelperResponse, SOCKET_PATH};
 use fanguard_lib::smc_writer::{SmcWriteApi, SmcWriter};
+
+const HELPER_SOCKET_MODE: u32 = 0o660;
+const ROOT_UID: libc::uid_t = 0;
 
 fn main() {
     eprintln!("[fanguard-helper] Starting privileged helper daemon");
@@ -40,8 +44,9 @@ fn main() {
     };
 
     // Restrict socket to owner (root) and group (staff) only — no world access
-    if let Err(e) = fs::set_permissions(SOCKET_PATH, fs::Permissions::from_mode(0o660)) {
-        eprintln!("[fanguard-helper] Failed to set socket permissions: {e}");
+    if let Err(e) = configure_socket_access(SOCKET_PATH) {
+        eprintln!("[fanguard-helper] Failed to configure socket access: {e}");
+        std::process::exit(1);
     }
 
     eprintln!("[fanguard-helper] Listening on {SOCKET_PATH}");
@@ -62,11 +67,9 @@ fn main() {
     while running.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, _addr)) => {
-                stream
-                    .set_nonblocking(false)
-                    .unwrap_or_else(|e| {
-                        eprintln!("[fanguard-helper] Failed to set blocking on client: {e}")
-                    });
+                stream.set_nonblocking(false).unwrap_or_else(|e| {
+                    eprintln!("[fanguard-helper] Failed to set blocking on client: {e}")
+                });
                 let writer_ref = Arc::clone(&writer);
                 if let Err(e) = handle_client(stream, &writer_ref) {
                     eprintln!("[fanguard-helper] Client error: {e}");
@@ -86,7 +89,9 @@ fn main() {
 }
 
 fn handle_client(stream: UnixStream, writer: &Mutex<SmcWriter>) -> std::io::Result<()> {
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap_or(());
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .unwrap_or(());
     let limited = (&stream).take(8192);
     let mut reader = BufReader::new(limited);
     let mut line = String::new();
@@ -116,6 +121,41 @@ fn send_response(stream: &UnixStream, response: &HelperResponse) -> std::io::Res
         .unwrap_or_else(|_| r#"{"status":"error","message":"serialization failed"}"#.to_string());
     resp_line.push('\n');
     writer.write_all(resp_line.as_bytes())
+}
+
+fn helper_socket_group_name() -> &'static str {
+    "staff"
+}
+
+fn configure_socket_access(path: &str) -> std::io::Result<()> {
+    let staff_gid = resolve_group_id(helper_socket_group_name())?;
+    chown_socket(path, ROOT_UID, staff_gid)?;
+    fs::set_permissions(path, fs::Permissions::from_mode(HELPER_SOCKET_MODE))
+}
+
+fn resolve_group_id(group_name: &str) -> std::io::Result<libc::gid_t> {
+    let c_group_name = CString::new(group_name)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    let group = unsafe { libc::getgrnam(c_group_name.as_ptr()) };
+    if group.is_null() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("group '{group_name}' not found"),
+        ));
+    }
+
+    Ok(unsafe { (*group).gr_gid })
+}
+
+fn chown_socket(path: &str, uid: libc::uid_t, gid: libc::gid_t) -> std::io::Result<()> {
+    let c_path =
+        CString::new(path).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    let result = unsafe { libc::chown(c_path.as_ptr(), uid, gid) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
 }
 
 fn dispatch_request(request: HelperRequest, writer: &Mutex<SmcWriter>) -> HelperResponse {
@@ -162,5 +202,15 @@ fn dispatch_request(request: HelperRequest, writer: &Mutex<SmcWriter>) -> Helper
         HelperRequest::DiagnoseFanControl => HelperResponse::OkDiagnose {
             lines: guard.diagnose_fan_control(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::helper_socket_group_name;
+
+    #[test]
+    fn helper_socket_uses_staff_group_for_gui_user_access() {
+        assert_eq!(helper_socket_group_name(), "staff");
     }
 }

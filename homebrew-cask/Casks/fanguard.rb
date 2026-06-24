@@ -1,6 +1,6 @@
 cask "fanguard" do
-  version "0.1.0-beta.2"
-  sha256 "8014795b7edbcd0a56639f4292b5564c7403668b4da1e5da5491db1ce5a7d338"
+  version "0.1.0-beta.3"
+  sha256 "b6af7f31344a7de6cf4d2abc9a605de96d1ea63149e42bd78ff21c181894847c"
 
   url "https://github.com/naufaldi/mac-fan-ctrl/releases/download/v#{version}/FanGuard_#{version}_universal.dmg"
   name "FanGuard"
