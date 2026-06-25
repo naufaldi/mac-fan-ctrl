@@ -8,7 +8,7 @@ mac-fan-ctrl requires IOKit/SMC access, which is incompatible with the Mac App S
 
 ### Ad-hoc (local development)
 
-The default config uses `"-"` as `signingIdentity`, which produces an ad-hoc signature. This works for local development and testing but will trigger Gatekeeper warnings on other machines.
+Use `"-"` as `signingIdentity` only when you intentionally want an ad-hoc local build. This works for local development and testing but will trigger Gatekeeper warnings on other machines.
 
 ### Developer ID (distribution)
 

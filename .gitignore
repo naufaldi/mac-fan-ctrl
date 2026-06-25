@@ -3,6 +3,11 @@ dist
 src-tauri/target
 src-tauri/fanguard-helper-universal-apple-darwin
 src-tauri/target-check/
+.env
+.env.*
+*.p12
+*.p12.base64.txt
+certificate.p12
 .DS_Store
 .vscode/
 .idea/

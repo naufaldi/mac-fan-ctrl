@@ -12,7 +12,7 @@ How to publish a new release of FanGuard via GitHub Releases and Homebrew.
    ```
    This outputs a public key and a base64 private key.
 
-2. **Add GitHub secrets** (Settings > Secrets and variables > Actions):
+2. **Add Tauri updater GitHub secrets** (Settings > Secrets and variables > Actions):
    - `TAURI_SIGNING_PRIVATE_KEY` — the base64 private key from step 1
    - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — the password you chose (or empty)
 
@@ -25,7 +25,16 @@ How to publish a new release of FanGuard via GitHub Releases and Homebrew.
    }
    ```
 
-4. **Create Homebrew tap repo**:
+4. **Add Apple signing and notarization GitHub secrets**:
+   - `APPLE_CERTIFICATE` — base64 encoded Developer ID Application `.p12`
+   - `APPLE_CERTIFICATE_PASSWORD` — password used when exporting the `.p12`
+   - `KEYCHAIN_PASSWORD` — random password for the temporary CI keychain
+   - `APPLE_SIGNING_IDENTITY` — `Developer ID Application: Naufaldi Rafif Satriya (J7C53T6UGG)`
+   - `APPLE_ID` — Apple ID email used for notarization
+   - `APPLE_PASSWORD` — Apple app-specific password
+   - `APPLE_TEAM_ID` — Apple Developer Team ID
+
+5. **Create Homebrew tap repo**:
    - Create a new public GitHub repo: `naufaldi/homebrew-tap`
    - Copy `homebrew-cask/Casks/fanguard.rb` into it at `Casks/fanguard.rb`
    - Commit and push
@@ -56,6 +65,8 @@ git push origin v0.1.0-beta.1
 
 The `release.yml` workflow triggers on any `v*` tag push. It:
 - Builds a universal macOS binary (Intel + Apple Silicon)
+- Imports the Developer ID certificate into a temporary CI keychain
+- Signs, notarizes, and staples the macOS app bundle
 - Creates a draft GitHub Release with the `.dmg` attached
 - Generates `latest.json` for the auto-updater
 - Marks it as a prerelease (for beta tags)
@@ -65,8 +76,14 @@ The `release.yml` workflow triggers on any `v*` tag push. It:
 1. Go to [GitHub Releases](https://github.com/naufaldi/mac-fan-ctrl/releases)
 2. Find the draft release
 3. Review the attached assets (should include `.dmg` and `latest.json`)
-4. Edit release notes if needed
-5. Click "Publish release"
+4. Download the `.dmg` and verify Gatekeeper acceptance before publishing:
+   ```bash
+   codesign --verify --deep --strict --verbose=4 /Applications/FanGuard.app
+   spctl --assess --type execute --verbose=4 /Applications/FanGuard.app
+   xcrun stapler validate -v /Applications/FanGuard.app
+   ```
+5. Edit release notes if needed
+6. Click "Publish release"
 
 ### 5. Update Homebrew cask
 
@@ -118,6 +135,6 @@ If upgrade is skipped with "tap trust is required", run `brew trust naufaldi/tap
 
 ## Notes
 
-- The app is currently **ad-hoc signed** (`signingIdentity: "-"`). Users must right-click > Open on first launch to bypass Gatekeeper.
-- For proper Gatekeeper support, an Apple Developer ID certificate ($99/year) is needed for code signing and notarization.
+- Release artifacts must be Developer ID signed and notarized before publishing. Gatekeeper should report `accepted`.
+- For proper Gatekeeper support, the Apple Developer ID certificate must be exported with its private key as a `.p12` for CI.
 - The `latest.json` file uploaded to releases enables the in-app auto-updater to detect new versions.
