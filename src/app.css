@@ -7,72 +7,80 @@ select {
 }
 
 @theme {
-  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-  --font-mono: "SF Mono", SFMono-Regular, Monaco, monospace;
+  /* Fonts — Apple system fonts for UI/data, DM Sans (Waldenburg substitute) for display */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace;
+  --font-display: "DM Sans", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+
+  /* Parchment palette (see docs/design.md) */
+  --color-parchment-white: #fdfcfc;
+  --color-warm-sand: #f5f3f1;
+  --color-sand-hover: #efedea;
+  --color-ash-border: #e5e5e5;
+  --color-ash-strong: #d4d4d4;
+  --color-midnight-ink: #000000;
+  --color-driftwood: #777169;
+  --color-fog: #a59f97;
+  --color-silver-mist: #b1b0b0;
+  --color-ember-orange: #ff4704;
+  --color-void-violet: #0447ff;
 }
 
 :root {
   color-scheme: light;
-  --surface-0: #f3f3f5;
-  --surface-1: #ffffff;
-  --surface-2: #f7f7f9;
-  --surface-muted: #ededf1;
-  --surface-hover: #e8e8ed;
-  --border-subtle: #d9d9e0;
-  --border-strong: #c8c8d1;
-  --text-primary: #1b1b20;
-  --text-secondary: #3a3a42;
-  --text-muted: #5e5e68;
-  --text-value: #101015;
-  --focus-ring: #2f6ef6;
-  --focus-ring-offset: #ffffff;
-  --control-active-bg: #dfe7ff;
-  --control-active-border: #6f8cff;
-  --control-active-text: #1b2b63;
-  --status-normal: #1bb74f;
-  --status-warm: #ffb326;
-  --status-hot: #ff5f57;
-  --status-unknown: #9494a3;
+
+  /* Surfaces — parchment canvas + warm sand + elevated */
+  --surface-0: var(--color-parchment-white);
+  --surface-1: var(--color-parchment-white);
+  --surface-2: var(--color-warm-sand);
+  --surface-muted: var(--color-warm-sand);
+  --surface-hover: var(--color-sand-hover);
+  --surface-elevated: #ffffff;
+
+  /* Borders — hairline ash */
+  --border-subtle: var(--color-ash-border);
+  --border-strong: var(--color-ash-strong);
+
+  /* Text — ink / driftwood / fog */
+  --text-primary: var(--color-midnight-ink);
+  --text-secondary: var(--color-driftwood);
+  --text-muted: var(--color-fog);
+  --text-value: var(--color-midnight-ink);
+
+  /* Focus — ink ring, no blue */
+  --focus-ring: var(--color-midnight-ink);
+  --focus-ring-offset: var(--color-parchment-white);
+
+  /* Active control — filled ink (HIG segmented/primary) */
+  --control-active-bg: var(--color-midnight-ink);
+  --control-active-border: var(--color-midnight-ink);
+  --control-active-text: #ffffff;
+
+  /* Status — monochrome, ember reserved for hot (>=85C) */
+  --status-normal: var(--color-driftwood);
+  --status-warm: var(--color-driftwood);
+  --status-hot: var(--color-ember-orange);
+  --status-unknown: var(--color-silver-mist);
   --color-status-normal: var(--status-normal);
   --color-status-warm: var(--status-warm);
   --color-status-hot: var(--status-hot);
   --color-status-unknown: var(--status-unknown);
   --color-surface-card: var(--surface-2);
   --color-surface-hover: var(--surface-hover);
-  --radius-card: 8px;
-  --radius-dot: 9999px;
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --surface-0: #151618;
-    --surface-1: #1d1e22;
-    --surface-2: #25272d;
-    --surface-muted: #2f3239;
-    --surface-hover: #373b44;
-    --border-subtle: #626a79;
-    --border-strong: #778090;
-    --text-primary: #f2f2f5;
-    --text-secondary: #d5d8e0;
-    --text-muted: #a7acb8;
-    --text-value: #ffffff;
-    --focus-ring: #88a8ff;
-    --focus-ring-offset: #101114;
-    --control-active-bg: #6b7383;
-    --control-active-border: #9ea8bd;
-    --control-active-text: #ffffff;
-    --status-normal: #34c759;
-    --status-warm: #ffcc00;
-    --status-hot: #ff5f57;
-    --status-unknown: #8e8e93;
-    --color-status-normal: var(--status-normal);
-    --color-status-warm: var(--status-warm);
-    --color-status-hot: var(--status-hot);
-    --color-status-unknown: var(--status-unknown);
-    --color-surface-card: var(--surface-2);
-    --color-surface-hover: var(--surface-hover);
-  }
+  /* Radii — Apple HIG geometry */
+  --radius-card: 12px;
+  --radius-button: 7px;
+  --radius-segmented: 6px;
+  --radius-input: 5px;
+  --radius-dialog: 10px;
+  --radius-capsule: 9999px;
+  --radius-dot: 9999px;
+
+  /* Shadows — hairline only */
+  --shadow-hairline: rgba(0, 0, 0, 0.06) 0px 0px 0px 1px, rgba(0, 0, 0, 0.04) 0px 1px 2px 0px;
+  --shadow-elevated: rgba(0, 0, 0, 0.4) 0px 0px 1px 0px, rgba(0, 0, 0, 0.04) 0px 1px 1px 0px, rgba(0, 0, 0, 0.04) 0px 2px 4px 0px;
+  --shadow-inset: rgba(0, 0, 0, 0.075) 0px 0px 0px 0.5px inset;
 }
 
 html,
@@ -87,7 +95,10 @@ body,
 
 body {
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: 13px;
+  letter-spacing: 0.01em;
   background-color: var(--surface-0);
   color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }

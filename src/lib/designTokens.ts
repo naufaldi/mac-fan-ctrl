@@ -39,12 +39,25 @@ export const SurfaceColors = {
 /** CSS variable references for border radius */
 export const Radius = {
   card: 'var(--radius-card)',
+  button: 'var(--radius-button)',
+  segmented: 'var(--radius-segmented)',
+  input: 'var(--radius-input)',
+  dialog: 'var(--radius-dialog)',
+  capsule: 'var(--radius-capsule)',
   dot: 'var(--radius-dot)',
 } as const;
 
-/** CSS variable reference for mono font */
+/** CSS variable references for hairline shadows */
+export const Shadows = {
+  hairline: 'var(--shadow-hairline)',
+  elevated: 'var(--shadow-elevated)',
+  inset: 'var(--shadow-inset)',
+} as const;
+
+/** CSS variable reference for fonts */
 export const FontMono = 'var(--font-mono)';
 export const FontUi = 'var(--font-ui)';
+export const FontDisplay = 'var(--font-display)';
 
 export type FanControlMode = 'auto' | 'constant';
 

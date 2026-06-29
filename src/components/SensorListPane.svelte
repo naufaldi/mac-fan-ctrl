@@ -43,14 +43,13 @@ const cnClasses = (
 
 function getStatusColor(value: number | null): string {
 	if (value === null) return "text-(--text-muted)";
-	return "text-gray-900 dark:text-gray-100";
+	return "text-(--text-primary)";
 }
 
 function getStatusDotColor(value: number | null): string {
-	if (value === null) return "bg-gray-400";
-	if (value > 85) return "bg-red-500";
-	if (value >= 70) return "bg-yellow-500";
-	return "bg-green-500";
+	if (value === null) return "bg-(--color-silver-mist)";
+	if (value > 85) return "bg-(--color-ember-orange)";
+	return "bg-(--color-driftwood)";
 }
 
 function formatValue(sensor: Sensor): string {
@@ -88,33 +87,15 @@ function getSensorIcon(name: string) {
 }
 
 function getSensorIconColor(name: string) {
-	const lowerName = name.toLowerCase();
 	if (name === "Disk Drives:") return "text-(--text-muted)";
-	if (lowerName.includes("cpu")) return "text-green-600 dark:text-green-500";
-	if (lowerName.includes("gpu")) return "text-green-600 dark:text-green-500";
-	if (lowerName.includes("ram") || lowerName.includes("memory"))
-		return "text-green-600 dark:text-green-500";
-	if (
-		lowerName.includes("ssd") ||
-		lowerName.includes("storage") ||
-		lowerName.includes("hdd")
-	)
-		return "text-gray-600 dark:text-gray-400";
-	if (lowerName.includes("battery")) return "text-gray-600 dark:text-gray-400";
-	if (
-		lowerName.includes("airport") ||
-		lowerName.includes("wi-fi") ||
-		lowerName.includes("wifi")
-	)
-		return "text-blue-500";
-	return "text-gray-500";
+	return "text-(--text-secondary)";
 }
 </script>
 
 <aside class={cnClasses("min-h-0 overflow-y-auto bg-(--surface-1)")} aria-label="Temperature sensors panel">
   <!-- Header -->
   <div
-    class={cnClasses("sticky top-0 grid grid-cols-[1fr_auto] items-center border-b border-(--border-subtle) bg-(--surface-2) text-[11px] font-medium text-gray-600 dark:text-gray-300")}
+    class={cnClasses("sticky top-0 grid grid-cols-[1fr_auto] items-center border-b border-(--border-subtle) bg-(--surface-2) text-[11px] font-medium text-(--text-secondary)")}
     role="row"
   >
     <div class="px-2 py-1 flex items-center border-r border-(--border-subtle)">Sensor</div>
@@ -136,7 +117,7 @@ function getSensorIconColor(name: string) {
         {@const Icon = getSensorIcon(sensor.name)}
         <div
           class={cnClasses(
-            "grid grid-cols-[1fr_auto] items-center odd:bg-(--surface-1) even:bg-(--surface-2) hover:bg-(--surface-hover)"
+            "grid grid-cols-[1fr_auto] items-center border-b border-(--border-subtle) hover:bg-(--surface-hover) last:border-b-0"
           )}
           role="row"
         >

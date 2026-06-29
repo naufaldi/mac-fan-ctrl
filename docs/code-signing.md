@@ -2,7 +2,10 @@
 
 ## Overview
 
-mac-fan-ctrl requires IOKit/SMC access, which is incompatible with the Mac App Store sandbox. Distribution uses Developer ID signing + notarization.
+FanGuard now has two macOS distribution paths:
+
+- **Developer ID/Homebrew**: direct distribution with fan control, the privileged helper, GitHub updater, and notarization.
+- **TestFlight/App Store Connect**: sandboxed, monitoring-only distribution. Fan write actions, privileged helper install, LaunchDaemon setup, root/admin escalation, and the self-updater are disabled or hidden.
 
 ## Signing Modes
 
@@ -51,7 +54,7 @@ export APPLE_TEAM_ID="YOUR_TEAM_ID"
 
 ### Manual Notarization
 
-After building with `pnpm tauri build`:
+After building with `pnpm tauri:build:direct`:
 
 ```bash
 # Submit for notarization
@@ -69,19 +72,51 @@ xcrun stapler staple \
 
 ### Tauri Notarization (CI)
 
-Tauri v2 supports automatic notarization when these env vars are set during `pnpm tauri build`. See [Tauri Code Signing docs](https://tauri.app/distribute/sign/macos/).
+Tauri v2 supports automatic notarization when these env vars are set during `pnpm tauri:build:direct`. See [Tauri Code Signing docs](https://tauri.app/distribute/sign/macos/).
 
 ## Entitlements
 
-The `Entitlements.plist` disables App Sandbox (`com.apple.security.app-sandbox = false`) because the app requires:
+The direct distribution `Entitlements.plist` disables App Sandbox (`com.apple.security.app-sandbox = false`) because fan control requires:
 
 - Direct IOKit access to `AppleSMC` for reading/writing SMC keys
 - Root privilege escalation for fan control writes
 
-## Mac App Store Incompatibility
+The TestFlight distribution uses `Entitlements.testflight.plist` with App Sandbox enabled:
 
-This app cannot be distributed via the Mac App Store because:
+```xml
+<key>com.apple.security.app-sandbox</key>
+<true/>
+```
+
+## TestFlight Build
+
+Use the TestFlight config merge and Rust feature:
+
+```bash
+pnpm tauri:build:testflight
+```
+
+This runs:
+
+```bash
+tauri build --features app-store --config src-tauri/tauri.testflight.conf.json --bundles app --ci
+```
+
+The TestFlight config:
+
+- enables App Sandbox via `Entitlements.testflight.plist`
+- strips helper artifacts from the final `.app` bundle
+- disables Tauri `macOSPrivateApi`
+- removes updater permissions from the TestFlight window capability
+- builds the frontend with `VITE_FANGUARD_DISTRIBUTION=app-store`
+
+## Mac App Store Constraints
+
+The direct fan-control feature set is not shipped to TestFlight because:
 
 1. SMC writes require root privileges
-2. IOKit direct access is blocked by App Sandbox
-3. The app uses `macOSPrivateApi` for tray-only mode
+2. LaunchDaemon/helper installation requires admin escalation
+3. App Store builds must use App Sandbox
+4. App Store updates are managed through App Store Connect, not the GitHub updater
+
+The TestFlight path keeps read-only monitoring and hides unsupported write controls.

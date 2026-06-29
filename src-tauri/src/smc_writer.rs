@@ -41,6 +41,14 @@ pub enum SmcWriteError {
     ModeTransitionTimedOut,
     #[error("Fan mode verification failed: mode {actual} still blocks target writes")]
     ModeVerificationFailed { actual: u8 },
+    #[error(
+        "Fan {fan_index} target RPM verification failed: requested {requested}, actual {actual:?}"
+    )]
+    TargetVerificationFailed {
+        fan_index: u8,
+        requested: f32,
+        actual: Option<f32>,
+    },
     #[error("Privileged helper is not running")]
     HelperNotRunning,
     #[error("Helper communication error: {0}")]
@@ -262,15 +270,24 @@ impl SmcWriter {
             Ok(info) => {
                 let type_bytes = info.data_type.to_be_bytes();
                 let type_str = String::from_utf8_lossy(&type_bytes);
-                lines.push(format!("Ftst key: EXISTS (type={type_str} size={})", info.data_size));
+                lines.push(format!(
+                    "Ftst key: EXISTS (type={type_str} size={})",
+                    info.data_size
+                ));
                 match self.read_key_bytes(ftst_key, info.data_size) {
                     Ok(val) => lines.push(format!("Ftst value: {:?}", val)),
                     Err(e) => lines.push(format!("Ftst read error: {e}")),
                 }
             }
             Err(SmcWriteError::UnknownKey(_)) => {
-                lines.push("Ftst key: NOT FOUND — this Mac does not have the diagnostic unlock key".to_string());
-                lines.push("  -> Direct F*Md writes may work (pre-14.4 firmware) or may be blocked".to_string());
+                lines.push(
+                    "Ftst key: NOT FOUND — this Mac does not have the diagnostic unlock key"
+                        .to_string(),
+                );
+                lines.push(
+                    "  -> Direct F*Md writes may work (pre-14.4 firmware) or may be blocked"
+                        .to_string(),
+                );
             }
             Err(e) => lines.push(format!("Ftst key check error: {e}")),
         }
@@ -313,7 +330,9 @@ impl SmcWriter {
                                 Ok(ac_val) => {
                                     let type_bytes = ac_info.data_type.to_be_bytes();
                                     let rpm = decode_rpm(&ac_val, &type_bytes);
-                                    lines.push(format!("  F{i}Ac (actual RPM): {rpm:.0} (raw={ac_val:?})"));
+                                    lines.push(format!(
+                                        "  F{i}Ac (actual RPM): {rpm:.0} (raw={ac_val:?})"
+                                    ));
                                 }
                                 Err(e) => lines.push(format!("  F{i}Ac read error: {e}")),
                             },
@@ -417,9 +436,9 @@ impl SmcWriter {
                         "[smc_writer] unlock_fan_control: Ftst readback after write={:?}",
                         readback
                     ),
-                    Err(e) => debug_log!(
-                        "[smc_writer] unlock_fan_control: Ftst readback failed: {e}"
-                    ),
+                    Err(e) => {
+                        debug_log!("[smc_writer] unlock_fan_control: Ftst readback failed: {e}")
+                    }
                 }
             }
             Err(e) => debug_log!("[smc_writer] unlock_fan_control: write FAILED: {e}"),
@@ -513,12 +532,14 @@ impl SmcWriter {
 
         let mut verified = false;
         let mut attempt = 0u8;
+        let mut last_readback_rpm: Option<f32> = None;
 
         while attempt < MAX_VERIFY_ATTEMPTS && !verified {
             std::thread::sleep(Duration::from_millis(100));
             match self.read_key_bytes(key, key_info.data_size) {
                 Ok(readback) => {
                     let readback_rpm = decode_rpm(&readback, &type_bytes);
+                    last_readback_rpm = Some(readback_rpm);
                     let diff = (readback_rpm - rpm).abs();
                     if diff > VERIFY_TOLERANCE as f32 {
                         debug_log!(
@@ -534,16 +555,15 @@ impl SmcWriter {
                         verified = true;
                     }
                 }
-                Err(e) => debug_log!("[smc_writer] F{fan_index}Tg readback failed (attempt {}): {e}", attempt + 1),
+                Err(e) => debug_log!(
+                    "[smc_writer] F{fan_index}Tg readback failed (attempt {}): {e}",
+                    attempt + 1
+                ),
             }
             attempt += 1;
         }
 
-        if !verified {
-            warn_log!(
-                "[smc_writer] F{fan_index}Tg write verification failed after {MAX_VERIFY_ATTEMPTS} attempts — RPM may not have been applied"
-            );
-        }
+        validate_target_readback(fan_index, rpm, verified, last_readback_rpm)?;
 
         debug_log!("[smc_writer] set_fan_target_rpm: done fan={fan_index} rpm={rpm}");
         Ok(())
@@ -589,7 +609,9 @@ impl SmcWriter {
                 let mode = self.read_fan_mode(fan_index)?;
                 poll_count += 1;
                 if poll_count <= 5 || poll_count % 20 == 0 {
-                    debug_log!("[smc_writer] wait_for_system_mode_handoff: poll #{poll_count} mode={mode}");
+                    debug_log!(
+                        "[smc_writer] wait_for_system_mode_handoff: poll #{poll_count} mode={mode}"
+                    );
                 }
                 Ok(mode)
             },
@@ -646,7 +668,10 @@ impl SmcWriter {
         let input = SmcKeyData {
             key,
             data8: SMC_CMD_READ_BYTES,
-            key_info: SmcKeyDataKeyInfo { data_size, ..Default::default() },
+            key_info: SmcKeyDataKeyInfo {
+                data_size,
+                ..Default::default()
+            },
             ..Default::default()
         };
 
@@ -662,7 +687,10 @@ impl SmcWriter {
         let input_base = SmcKeyData {
             key,
             data8: SMC_CMD_WRITE_BYTES,
-            key_info: SmcKeyDataKeyInfo { data_size, ..Default::default() },
+            key_info: SmcKeyDataKeyInfo {
+                data_size,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let mut input = input_base;
@@ -803,9 +831,7 @@ fn encode_value(value: f32, data_type: u32, data_size: u32) -> Result<Vec<u8>, S
 /// Integer-based types (fpe2, sp78) remain big-endian per SMC protocol.
 fn decode_rpm(bytes: &[u8], type_bytes: &[u8; 4]) -> f32 {
     match type_bytes {
-        b"flt " if bytes.len() >= 4 => {
-            f32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
-        }
+        b"flt " if bytes.len() >= 4 => f32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
         b"fpe2" if bytes.len() >= 2 => {
             let raw = u16::from_be_bytes([bytes[0], bytes[1]]);
             raw as f32 / 4.0
@@ -814,9 +840,7 @@ fn decode_rpm(bytes: &[u8], type_bytes: &[u8; 4]) -> f32 {
             let raw = i16::from_be_bytes([bytes[0], bytes[1]]);
             raw as f32 / 256.0
         }
-        _ if bytes.len() >= 4 => {
-            f32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
-        }
+        _ if bytes.len() >= 4 => f32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
         _ if bytes.len() >= 2 => {
             let raw = u16::from_be_bytes([bytes[0], bytes[1]]);
             raw as f32 / 4.0
@@ -855,6 +879,23 @@ fn validate_mode_allows_target_write(actual_mode: u8) -> Result<(), SmcWriteErro
             actual: actual_mode,
         }),
     }
+}
+
+fn validate_target_readback(
+    fan_index: u8,
+    requested: f32,
+    verified: bool,
+    actual: Option<f32>,
+) -> Result<(), SmcWriteError> {
+    if verified {
+        return Ok(());
+    }
+
+    Err(SmcWriteError::TargetVerificationFailed {
+        fan_index,
+        requested,
+        actual,
+    })
 }
 
 fn detect_fan_mode_capability(
@@ -902,6 +943,7 @@ pub mod mock {
             }
         }
 
+        #[allow(dead_code)]
         pub fn failing() -> Self {
             Self {
                 calls: RefCell::new(Vec::new()),
@@ -949,9 +991,7 @@ pub mod mock {
         }
 
         fn unlock_fan_control(&self) -> Result<(), SmcWriteError> {
-            self.calls
-                .borrow_mut()
-                .push(MockSmcCall::UnlockFanControl);
+            self.calls.borrow_mut().push(MockSmcCall::UnlockFanControl);
             if self.should_fail {
                 Err(SmcWriteError::InsufficientPrivileges)
             } else {
@@ -1084,6 +1124,20 @@ mod tests {
         let result = detect_fan_mode_capability(Err(SmcWriteError::InsufficientPrivileges));
 
         assert!(matches!(result, Err(SmcWriteError::InsufficientPrivileges)));
+    }
+
+    #[test]
+    fn target_verification_failure_returns_error() {
+        let result = validate_target_readback(0, 5000.0, false, Some(2400.0));
+
+        assert!(matches!(
+            result,
+            Err(SmcWriteError::TargetVerificationFailed {
+                fan_index: 0,
+                requested,
+                actual: Some(actual),
+            }) if requested == 5000.0 && actual == 2400.0
+        ));
     }
 
     #[test]

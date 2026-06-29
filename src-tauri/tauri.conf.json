@@ -10,7 +10,7 @@
 		"frontendDist": "../dist"
 	},
 	"app": {
-		"macOSPrivateApi": true,
+		"macOSPrivateApi": false,
 		"windows": [
 			{
 				"title": "FanGuard Beta",
@@ -23,7 +23,6 @@
 	},
 	"bundle": {
 		"active": true,
-		"externalBin": ["fanguard-helper"],
 		"icon": ["icons/icon.icns", "icons/icon.png"],
 		"macOS": {
 			"entitlements": "Entitlements.plist",

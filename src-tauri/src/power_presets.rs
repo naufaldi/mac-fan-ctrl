@@ -45,8 +45,7 @@ pub fn save_power_preset_config(config: &PowerPresetConfig) -> Result<(), String
     fs::create_dir_all(&dir).map_err(|e| format!("Failed to create config dir: {e}"))?;
     let json =
         serde_json::to_string_pretty(config).map_err(|e| format!("Failed to serialize: {e}"))?;
-    fs::write(&path, &json)
-        .map_err(|e| format!("Failed to write power preset config: {e}"))?;
+    fs::write(&path, &json).map_err(|e| format!("Failed to write power preset config: {e}"))?;
     fix_ownership_if_root(&dir);
     fix_ownership_if_root(&path);
     Ok(())

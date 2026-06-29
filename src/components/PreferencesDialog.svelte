@@ -1,20 +1,42 @@
 <script lang="ts">
 import { fade, scale } from "svelte/transition";
 import { cn } from "$lib/cn";
+import { getTrayDisplayMode, setTrayDisplayMode } from "$lib/tauriCommands";
 import PowerPresetSettings from "./PowerPresetSettings.svelte";
 
 interface Props {
 	onclose: () => void;
+	fanControlAvailable: boolean;
 }
 
-const { onclose }: Props = $props();
+const { onclose, fanControlAvailable }: Props = $props();
 
 let dialogEl: HTMLDivElement | undefined = $state(undefined);
 let closeButtonEl: HTMLButtonElement | undefined = $state(undefined);
+let trayDisplayMode: number = $state(0);
 
 $effect(() => {
 	closeButtonEl?.focus();
 });
+
+$effect(() => {
+	getTrayDisplayMode()
+		.then((mode) => {
+			trayDisplayMode = mode;
+		})
+		.catch(() => {
+			trayDisplayMode = 0;
+		});
+});
+
+async function handleTrayModeChange(mode: number): Promise<void> {
+	trayDisplayMode = mode;
+	try {
+		await setTrayDisplayMode(mode);
+	} catch (error) {
+		console.error("[PreferencesDialog] Failed to set tray display mode:", error);
+	}
+}
 
 function handleKeydown(event: KeyboardEvent): void {
 	if (event.key === "Escape") {
@@ -40,7 +62,11 @@ function handleKeydown(event: KeyboardEvent): void {
 }
 
 const buttonBase =
-	"cursor-pointer rounded-[5px] border px-4 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
+	"cursor-pointer rounded-(--radius-button) border px-4 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-1 focus-visible:ring-offset-(--focus-ring-offset)";
+const doneButton = cn(
+	buttonBase,
+	"border-(--border-subtle) bg-(--surface-elevated) text-(--text-primary) shadow-(--shadow-hairline) hover:bg-(--surface-2)",
+);
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -51,7 +77,7 @@ const buttonBase =
 >
   <button
     type="button"
-    class={cn('absolute inset-0 bg-black/30 backdrop-blur-[1px] cursor-default')}
+    class={cn('absolute inset-0 bg-black/20 backdrop-blur-[1px] cursor-default')}
     onclick={onclose}
     aria-label="Close dialog"
     tabindex="-1"
@@ -60,7 +86,7 @@ const buttonBase =
   <div
     bind:this={dialogEl}
     class={cn(
-      'relative w-[380px] rounded-lg border border-gray-300 dark:border-[#4a4a4a] bg-[#ececec] dark:bg-[#2d2d2d] shadow-2xl'
+      'relative w-[380px] rounded-(--radius-dialog) border border-(--border-subtle) bg-(--surface-elevated) shadow-(--shadow-elevated)'
     )}
     role="dialog"
     aria-modal="true"
@@ -73,18 +99,59 @@ const buttonBase =
       </h2>
     </div>
 
-    <div class={cn('px-6 py-3')}>
-      <PowerPresetSettings />
+    <div class={cn('flex flex-col gap-5 px-6 py-3')}>
+      <div class={cn('flex flex-col gap-2')}>
+        <p class={cn('text-[12px] font-medium text-(--text-primary)')}>Menu bar display</p>
+        <div class={cn('flex gap-0 rounded-(--radius-segmented) border border-(--border-subtle) bg-(--surface-2) p-0.5')} role="radiogroup" aria-label="Menu bar display">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={trayDisplayMode === 0}
+            class={cn(
+              'flex-1 rounded-[5px] px-3 py-1 text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--focus-ring)',
+              trayDisplayMode === 0
+                ? 'bg-(--control-active-bg) text-(--control-active-text) font-medium'
+                : 'text-(--text-secondary) hover:text-(--text-primary)'
+            )}
+            onclick={() => handleTrayModeChange(0)}
+          >
+            CPU Temperature
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={trayDisplayMode === 1}
+            class={cn(
+              'flex-1 rounded-[5px] px-3 py-1 text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--focus-ring)',
+              trayDisplayMode === 1
+                ? 'bg-(--control-active-bg) text-(--control-active-text) font-medium'
+                : 'text-(--text-secondary) hover:text-(--text-primary)'
+            )}
+            onclick={() => handleTrayModeChange(1)}
+          >
+            Fan RPM
+          </button>
+        </div>
+      </div>
+
+      <div class={cn('border-t border-(--border-subtle)')}></div>
+
+      <div>
+        {#if fanControlAvailable}
+          <PowerPresetSettings />
+        {:else}
+          <p class={cn('text-[12px] text-(--text-secondary)')}>
+            Fan preset automation is unavailable in TestFlight builds.
+          </p>
+        {/if}
+      </div>
     </div>
 
     <div class={cn('flex justify-end px-6 pb-5 pt-2')}>
       <button
         type="button"
         bind:this={closeButtonEl}
-        class={cn(
-          buttonBase,
-          'border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#3a3a3a] text-(--text-primary) shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-gray-50 dark:hover:bg-[#444]'
-        )}
+        class={doneButton}
         onclick={onclose}
       >
         Done

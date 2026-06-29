@@ -1,0 +1,10 @@
+{
+	"$schema": "../node_modules/@tauri-apps/cli/schema.json",
+	"bundle": {
+		"externalBin": ["fanguard-helper"],
+		"macOS": {
+			"entitlements": "Entitlements.plist",
+			"signingIdentity": "Developer ID Application: Naufaldi Rafif Satriya (J7C53T6UGG)"
+		}
+	}
+}

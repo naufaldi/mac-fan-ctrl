@@ -28,8 +28,9 @@ impl std::fmt::Display for PowerSource {
 // FFI declarations for IOKit power source APIs
 extern "C" {
     fn IOPSCopyPowerSourcesInfo() -> core_foundation::base::CFTypeRef;
-    fn IOPSCopyPowerSourcesList(blob: core_foundation::base::CFTypeRef)
-        -> core_foundation::array::CFArrayRef;
+    fn IOPSCopyPowerSourcesList(
+        blob: core_foundation::base::CFTypeRef,
+    ) -> core_foundation::array::CFArrayRef;
     fn IOPSGetPowerSourceDescription(
         blob: core_foundation::base::CFTypeRef,
         ps: *const std::ffi::c_void,

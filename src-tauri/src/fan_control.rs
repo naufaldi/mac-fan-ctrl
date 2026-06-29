@@ -79,7 +79,11 @@ impl FanControlState {
 
     /// Removes a fan's config (returns it to Auto) and applies.
     /// Re-locks thermal control if no fans remain in a forced mode.
-    pub fn set_auto(&mut self, fan_index: u8, writer: &dyn SmcWriteApi) -> Result<(), SmcWriteError> {
+    pub fn set_auto(
+        &mut self,
+        fan_index: u8,
+        writer: &dyn SmcWriteApi,
+    ) -> Result<(), SmcWriteError> {
         writer.set_fan_auto(fan_index)?;
         self.configs.insert(fan_index, FanControlConfig::Auto);
 
@@ -166,9 +170,15 @@ impl FanControlState {
                         // Sensor found — reset miss counter and interpolate RPM
                         self.sensor_miss_counts.insert(*fan_index, 0);
                         if let Some(fan) = fans.iter().find(|f| f.index == *fan_index) {
-                            let target_rpm =
-                                interpolate_rpm(temp as f32, *temp_low, *temp_high, fan.min, fan.max);
-                            let _ = writer.set_fan_target_rpm(*fan_index, target_rpm, fan.min, fan.max);
+                            let target_rpm = interpolate_rpm(
+                                temp as f32,
+                                *temp_low,
+                                *temp_high,
+                                fan.min,
+                                fan.max,
+                            );
+                            let _ =
+                                writer.set_fan_target_rpm(*fan_index, target_rpm, fan.min, fan.max);
                         }
                     }
                     None => {
@@ -181,7 +191,8 @@ impl FanControlState {
                                 "[fanguard] SAFETY: sensor '{sensor_key}' missing for {misses} cycles on fan {fan_index} — forcing fan to max RPM"
                             );
                             if let Some(fan) = fans.iter().find(|f| f.index == *fan_index) {
-                                let _ = writer.set_fan_target_rpm(*fan_index, fan.max, fan.min, fan.max);
+                                let _ = writer
+                                    .set_fan_target_rpm(*fan_index, fan.max, fan.min, fan.max);
                             }
                         }
                     }
@@ -320,7 +331,11 @@ mod tests {
             unit: "C".to_string(),
             sensor_type: "temperature".to_string(),
             source: SensorSource::Smc,
-            null_reason: if value.is_none() { Some(NullReason::ReadError) } else { None },
+            null_reason: if value.is_none() {
+                Some(NullReason::ReadError)
+            } else {
+                None
+            },
         }
     }
 
@@ -458,7 +473,10 @@ mod tests {
         // Drop to 92°C (between CLEAR=90 and TRIGGER=95) — should stay active
         let warm = vec![make_sensor("TC0P", Some(92.0))];
         state.tick(&warm, &fans, &writer).unwrap();
-        assert!(state.is_emergency_active(), "Emergency should remain active in hysteresis band (90–95°C)");
+        assert!(
+            state.is_emergency_active(),
+            "Emergency should remain active in hysteresis band (90–95°C)"
+        );
     }
 
     #[test]
@@ -475,7 +493,10 @@ mod tests {
         // Drop to 89°C (below CLEAR=90) — should clear
         let cool = vec![make_sensor("TC0P", Some(89.0))];
         state.tick(&cool, &fans, &writer).unwrap();
-        assert!(!state.is_emergency_active(), "Emergency should clear below 90°C");
+        assert!(
+            !state.is_emergency_active(),
+            "Emergency should clear below 90°C"
+        );
     }
 
     // ── Sensor disappearance (#8) ────────────────────────────────────────
@@ -541,12 +562,17 @@ mod tests {
         let calls = writer.calls.borrow();
         let max_rpm_calls: Vec<_> = calls
             .iter()
-            .filter(|c| matches!(
-                c,
-                MockSmcCall::SetFanTargetRpm { rpm, .. } if (*rpm - 5800.0).abs() < 1.0
-            ))
+            .filter(|c| {
+                matches!(
+                    c,
+                    MockSmcCall::SetFanTargetRpm { rpm, .. } if (*rpm - 5800.0).abs() < 1.0
+                )
+            })
             .collect();
-        assert!(max_rpm_calls.is_empty(), "Expected no max-RPM calls, got {max_rpm_calls:?}");
+        assert!(
+            max_rpm_calls.is_empty(),
+            "Expected no max-RPM calls, got {max_rpm_calls:?}"
+        );
     }
 
     // ── set_config / set_auto with mock ──────────────────────────────────
@@ -557,7 +583,12 @@ mod tests {
         let mut state = FanControlState::new();
         let fans = vec![make_fan(0, 1200.0, 5800.0)];
 
-        let result = state.set_config(0, FanControlConfig::ConstantRpm { target_rpm: 3000.0 }, &fans, &writer);
+        let result = state.set_config(
+            0,
+            FanControlConfig::ConstantRpm { target_rpm: 3000.0 },
+            &fans,
+            &writer,
+        );
         assert!(result.is_ok());
         assert_eq!(state.configs().len(), 1);
 
@@ -575,13 +606,64 @@ mod tests {
         let fans = vec![make_fan(0, 1200.0, 5800.0)];
 
         // Set a config first
-        state.set_config(0, FanControlConfig::ConstantRpm { target_rpm: 3000.0 }, &fans, &writer).unwrap();
+        state
+            .set_config(
+                0,
+                FanControlConfig::ConstantRpm { target_rpm: 3000.0 },
+                &fans,
+                &writer,
+            )
+            .unwrap();
 
         // Now set back to auto
         state.set_auto(0, &writer).unwrap();
 
         let calls = writer.calls.borrow();
-        assert!(calls.iter().any(|c| matches!(c, MockSmcCall::SetFanAuto { fan_index: 0 })));
-        assert!(calls.iter().any(|c| matches!(c, MockSmcCall::LockFanControl)));
+        assert!(calls
+            .iter()
+            .any(|c| matches!(c, MockSmcCall::SetFanAuto { fan_index: 0 })));
+        assert!(calls
+            .iter()
+            .any(|c| matches!(c, MockSmcCall::LockFanControl)));
+    }
+
+    #[test]
+    fn overlay_configs_sets_forced_mode_and_target_for_constant_rpm() {
+        let mut state = FanControlState::new();
+        state
+            .configs
+            .insert(0, FanControlConfig::ConstantRpm { target_rpm: 4000.0 });
+        let mut fans = vec![make_fan(0, 1200.0, 5800.0)];
+
+        state.overlay_configs(&mut fans);
+
+        assert_eq!(fans[0].mode, FanMode::Forced);
+        assert_eq!(fans[0].target, 4000.0);
+    }
+
+    #[test]
+    fn overlay_configs_sets_auto_mode_for_auto_config() {
+        let mut state = FanControlState::new();
+        state.configs.insert(0, FanControlConfig::Auto);
+        let mut fans = vec![make_fan(0, 1200.0, 5800.0)];
+        fans[0].mode = FanMode::Forced;
+        fans[0].target = 5000.0;
+
+        state.overlay_configs(&mut fans);
+
+        assert_eq!(fans[0].mode, FanMode::Auto);
+    }
+
+    #[test]
+    fn overlay_configs_leaves_unconfigured_fan_unchanged() {
+        let state = FanControlState::new();
+        let mut fans = vec![make_fan(0, 1200.0, 5800.0)];
+        fans[0].mode = FanMode::Forced;
+        fans[0].target = 5000.0;
+
+        state.overlay_configs(&mut fans);
+
+        assert_eq!(fans[0].mode, FanMode::Forced);
+        assert_eq!(fans[0].target, 5000.0);
     }
 }

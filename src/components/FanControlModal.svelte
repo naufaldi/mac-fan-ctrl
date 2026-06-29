@@ -1,4 +1,5 @@
 <script lang="ts">
+import { AlertTriangle } from "lucide-svelte";
 import { untrack } from "svelte";
 import { fade, scale } from "svelte/transition";
 import { cn } from "$lib/cn";
@@ -93,6 +94,10 @@ const rangeBarAriaLabel = $derived(
 		: `Fan speed range: minimum at ${tempLow}°C, maximum at ${tempHigh}°C.`,
 );
 
+const isMarkerHot = $derived(
+	selectedSensorValue !== null && selectedSensorValue >= 85,
+);
+
 // ── Handlers ─────────────────────────────────────────────────────────────
 
 async function handleSubmit(): Promise<void> {
@@ -170,18 +175,18 @@ function handleKeydown(event: KeyboardEvent): void {
 // ── Shared styles ────────────────────────────────────────────────────────
 
 const buttonBase =
-	"cursor-pointer rounded-[5px] border px-4 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
+	"cursor-pointer rounded-(--radius-button) border px-4 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-1 focus-visible:ring-offset-(--focus-ring-offset)";
 const cancelButton = cn(
 	buttonBase,
-	"border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#3a3a3a] text-(--text-primary) shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-gray-50 dark:hover:bg-[#444]",
+	"border-(--border-subtle) bg-(--surface-elevated) text-(--text-primary) shadow-(--shadow-hairline) hover:bg-(--surface-2)",
 );
 const okButton = cn(
 	buttonBase,
-	"border-blue-500 bg-blue-500 text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed",
+	"border-(--control-active-border) bg-(--control-active-bg) text-(--control-active-text) disabled:opacity-50 disabled:cursor-not-allowed",
 );
 
 const inputBase =
-	"rounded-[4px] border border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#2a2a2a] px-2 py-1 text-[12px] text-(--text-primary) [font-variant-numeric:tabular-nums] focus:outline-none focus:ring-2 focus:ring-blue-500";
+	"rounded-(--radius-input) border border-(--border-subtle) bg-(--surface-elevated) px-2 py-1 text-[12px] text-(--text-primary) font-mono [font-variant-numeric:tabular-nums] focus:outline-none focus:ring-2 focus:ring-(--focus-ring)";
 
 // ── Extreme settings detection ──────────────────────────────────────────
 
@@ -220,7 +225,7 @@ const extremeWarningMessage = $derived(
   <!-- Backdrop (accessible button, not in tab order) -->
   <button
     type="button"
-    class={cn('absolute inset-0 bg-black/30 backdrop-blur-[1px] cursor-default')}
+    class={cn('absolute inset-0 bg-black/20 backdrop-blur-[1px] cursor-default')}
     onclick={handleCancel}
     aria-label="Close dialog"
     tabindex="-1"
@@ -230,7 +235,7 @@ const extremeWarningMessage = $derived(
   <div
     bind:this={dialogEl}
     class={cn(
-      'relative w-[420px] rounded-lg border border-gray-300 dark:border-[#4a4a4a] bg-[#ececec] dark:bg-[#2d2d2d] shadow-2xl'
+      'relative w-[420px] rounded-(--radius-dialog) border border-(--border-subtle) bg-(--surface-elevated) shadow-(--shadow-elevated)'
     )}
     role="dialog"
     aria-modal="true"
@@ -254,7 +259,7 @@ const extremeWarningMessage = $derived(
           name="control-mode"
           value="constant_rpm"
           bind:group={selectedMode}
-          class="accent-blue-500"
+          class="accent-(--color-midnight-ink)"
         />
         <span class={cn('text-[13px] text-(--text-primary)')}>Constant RPM value</span>
       </label>
@@ -277,7 +282,7 @@ const extremeWarningMessage = $derived(
       {/if}
 
       <!-- Separator -->
-      <div class={cn('border-t border-gray-300 dark:border-[#4a4a4a]')}></div>
+      <div class={cn('border-t border-(--border-subtle)')}></div>
 
       <!-- Sensor-based option -->
       <label class={cn('flex items-center gap-3 cursor-pointer')}>
@@ -286,7 +291,7 @@ const extremeWarningMessage = $derived(
           name="control-mode"
           value="sensor_based"
           bind:group={selectedMode}
-          class="accent-blue-500"
+          class="accent-(--color-midnight-ink)"
         />
         <span class={cn('text-[13px] text-(--text-primary)')}>Sensor-based value</span>
 
@@ -351,14 +356,16 @@ const extremeWarningMessage = $derived(
               {/if}
               <span>{tempHigh}°C</span>
             </div>
-            <div class={cn('relative h-2 rounded-full overflow-hidden bg-(--surface-muted)')}>
+            <div class={cn('relative h-2 rounded-full overflow-hidden bg-(--surface-2)')}>
               <div
-                class={cn('absolute inset-0 rounded-full')}
-                style="background: linear-gradient(to right, var(--status-normal), var(--status-warm), var(--status-hot))"
+                class={cn('absolute inset-0 rounded-full bg-(--color-midnight-ink) opacity-20')}
               ></div>
               {#if tempPosition !== null}
                 <div
-                  class={cn('absolute top-1/2 w-3 h-3 rounded-full border-2 border-[#ececec] dark:border-[#2d2d2d] bg-(--text-primary) shadow-sm')}
+                  class={cn(
+                    'absolute top-1/2 w-3 h-3 rounded-full border-2 border-(--surface-elevated) shadow-sm',
+                    isMarkerHot ? 'bg-(--color-ember-orange)' : 'bg-(--text-primary)'
+                  )}
                   style="left: {tempPosition * 100}%; transform: translate(-50%, -50%)"
                 ></div>
               {/if}
@@ -373,18 +380,19 @@ const extremeWarningMessage = $derived(
 
       <!-- Extreme settings warning -->
       {#if hasExtremeSettings}
-        <div class={cn('rounded-md border border-amber-400 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/30 p-3 space-y-2')} role="alert">
-          <p class={cn('text-[11px] text-amber-700 dark:text-amber-300 font-medium')}>
-            ⚠ {extremeWarningMessage}
+        <div class={cn('rounded-(--radius-input) border border-(--color-ember-orange) bg-(--surface-2) p-3 space-y-2')} role="alert">
+          <p class={cn('flex items-start gap-2 text-[11px] text-(--text-primary) font-medium')}>
+            <AlertTriangle size={14} class="shrink-0 text-(--color-ember-orange) mt-0.5" aria-hidden="true" />
+            <span>{extremeWarningMessage}</span>
           </p>
           {#if !extremeWarningAcknowledged}
-            <label class={cn('flex items-center gap-2 cursor-pointer')}>
+            <label class={cn('flex items-center gap-2 cursor-pointer ml-5')}>
               <input
                 type="checkbox"
                 bind:checked={extremeWarningAcknowledged}
-                class="accent-amber-500"
+                class="accent-(--color-midnight-ink)"
               />
-              <span class={cn('text-[11px] text-amber-600 dark:text-amber-400')}>I understand the risks</span>
+              <span class={cn('text-[11px] text-(--text-secondary)')}>I understand the risks</span>
             </label>
           {/if}
         </div>
@@ -397,7 +405,7 @@ const extremeWarningMessage = $derived(
           role="alert"
           aria-live="assertive"
         >
-          <p class="text-red-500">
+          <p class={isPrivilegeError ? "text-(--color-ember-orange)" : "text-(--text-secondary)"}>
             {isPrivilegeError
               ? "Fan control needs a one-time setup after install. Grant access to install the privileged helper."
               : errorMessage}
@@ -405,7 +413,7 @@ const extremeWarningMessage = $derived(
           {#if isPrivilegeError}
             <button
               type="button"
-              class={cn(buttonBase, 'min-h-[32px] border-amber-500 bg-amber-500 text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-amber-600')}
+              class={okButton}
               onclick={handleGrantAccess}
             >
               Grant Access

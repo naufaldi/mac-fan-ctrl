@@ -2,7 +2,9 @@ mod alerts;
 mod apple_silicon_sensors;
 mod commands;
 mod fan_control;
+mod fan_snapshot;
 mod fs_util;
+mod helper_binary;
 mod log;
 mod power_monitor;
 mod power_presets;
@@ -84,12 +86,21 @@ pub fn show_quit_confirmation(app_handle: &tauri::AppHandle) {
     thread::spawn(move || {
         use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
+        let message = if commands::distribution_allows_fan_control() {
+            "Fan speeds will be reset to automatic. Are you sure you want to quit?"
+        } else {
+            "Are you sure you want to quit FanGuard?"
+        };
+
         let confirmed = handle
             .dialog()
-            .message("Fan speeds will be reset to automatic. Are you sure you want to quit?")
+            .message(message)
             .title("Quit FanGuard")
             .kind(MessageDialogKind::Warning)
-            .buttons(MessageDialogButtons::OkCancelCustom("Quit".into(), "Cancel".into()))
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Quit".into(),
+                "Cancel".into(),
+            ))
             .blocking_show();
 
         QUIT_DIALOG_SHOWING.store(false, Ordering::SeqCst);
@@ -147,7 +158,10 @@ fn run_startup_diagnostics(app_handle: &tauri::AppHandle) {
     let uid = unsafe { libc::getuid() };
     let euid = unsafe { libc::geteuid() };
     debug_log!("\n[fanguard] === STARTUP DIAGNOSTICS ===");
-    debug_log!("[fanguard] UID={uid} EUID={euid} running_as_root={}", euid == 0);
+    debug_log!(
+        "[fanguard] UID={uid} EUID={euid} running_as_root={}",
+        euid == 0
+    );
 
     if let Ok(writer_guard) = state.smc_writer.lock() {
         match writer_guard.as_deref() {
@@ -322,10 +336,7 @@ pub fn apply_preset_by_name(app_handle: &tauri::AppHandle, preset_name: &str) {
     debug_log!("[fanguard] Applied preset '{preset_name}'");
 }
 
-fn check_power_source_change(
-    app_handle: &tauri::AppHandle,
-    last_power_source: &mut PowerSource,
-) {
+fn check_power_source_change(app_handle: &tauri::AppHandle, last_power_source: &mut PowerSource) {
     let current = power_monitor::current_power_source();
     if current == *last_power_source {
         return;
@@ -500,9 +511,12 @@ fn recover_orphaned_fan_modes(app_handle: &tauri::AppHandle) {
 }
 
 fn main() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+    let builder = tauri::Builder::default().plugin(tauri_plugin_notification::init());
+
+    #[cfg(not(feature = "app-store"))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .setup(|app| {
@@ -579,7 +593,9 @@ fn main() {
                 let _ = window.hide();
                 // Remove from Dock + Cmd+Tab when hidden
                 #[cfg(target_os = "macos")]
-                let _ = window.app_handle().set_activation_policy(tauri::ActivationPolicy::Accessory);
+                let _ = window
+                    .app_handle()
+                    .set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
             tauri::WindowEvent::Destroyed => {
                 restore_fans(window.app_handle());

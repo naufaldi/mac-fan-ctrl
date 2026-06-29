@@ -26,16 +26,20 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
-		"dev:prepare-helper": "\"$HOME/.cargo/bin/cargo\" build --manifest-path src-tauri/Cargo.toml --bin fanguard-helper",
+		"dev:prepare-helper": "\"$HOME/.cargo/bin/cargo\" build --manifest-path src-tauri/Cargo.toml --features helper-binary --bin fanguard-helper",
 		"build": "vite build",
+		"build:app-store": "VITE_FANGUARD_DISTRIBUTION=app-store vite build",
 		"preview": "vite preview",
 		"tauri": "tauri",
+		"tauri:build:direct": "tauri build --features helper-binary --config src-tauri/tauri.direct.conf.json",
+		"tauri:build:testflight": "bash scripts/build-testflight.sh",
 		"biome:check": "biome check . --linter-enabled=true --formatter-enabled=false",
 		"biome:format": "biome check . --formatter-enabled=true --linter-enabled=false",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:coverage": "vitest run --coverage",
-		"playwright:test": "playwright test"
+		"playwright:test": "playwright test",
+		"fan-control:hardware-smoke": "bash scripts/fan-control-hardware-smoke.sh"
 	},
 	"dependencies": {
 		"@tauri-apps/api": "2.10.1",

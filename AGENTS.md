@@ -69,12 +69,78 @@ pnpm biome:format     # Format
 
 # Testing
 pnpm test             # Unit tests (Vitest)
-pnpm playwright:test  # E2E tests
+pnpm playwright:test  # E2E fan-control regression (mocked Tauri)
+pnpm fan-control:hardware-smoke  # Gated hardware checklist (FANGUARD_HARDWARE_SMOKE=1)
 cd src-tauri && cargo test  # Rust tests
 
 # Build
 pnpm tauri build      # Release bundle
 ```
+
+## RTK (Agent Shell Commands)
+
+[rtk-ai/rtk](https://github.com/rtk-ai/rtk) compresses noisy dev command output before it reaches agent context. Prefer RTK-wrapped commands for regression runs and status checks; use raw commands when debugging a single failure and you need full logs.
+
+Install (once per machine):
+
+```bash
+brew install rtk
+# or: curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
+```
+
+| Task | Human / CI | Agent (prefer RTK) |
+|------|------------|---------------------|
+| Unit tests (Vitest) | `pnpm test` | `rtk vitest run` or `rtk pnpm test` |
+| Playwright E2E | `pnpm playwright:test` | `rtk pnpm playwright:test` |
+| Rust tests | `cd src-tauri && cargo test` | `cd src-tauri && rtk cargo test` |
+| Lint | `pnpm biome:check` | `rtk pnpm biome:check` |
+| Git status / diff | `git status`, `git diff` | `rtk git status`, `rtk git diff` |
+
+Fan-control regression (agent default):
+
+```bash
+rtk pnpm test
+rtk pnpm playwright:test
+cd src-tauri && rtk cargo test
+rtk pnpm biome:check
+```
+
+Do **not** wrap:
+
+- `pnpm dev`, `pnpm tauri dev` — interactive / streaming servers
+- `FANGUARD_HARDWARE_SMOKE=1 pnpm fan-control:hardware-smoke` — real SMC writes; manual checklist only
+- `sudo ...` — privilege elevation
+- First investigation of an unknown failure — run the raw command once, then switch back to RTK for reruns
+
+If RTK is installed, Cursor may also invoke it via `rtk hook cursor` in `~/.cursor/hooks.json` on Shell tool calls.
+
+## Fan Control Verification
+
+See [docs/fan-control-verification.md](docs/fan-control-verification.md) for the four-level verification strategy (Vitest/Rust unit tests, Playwright regression, optional agent-browser exploration, gated hardware smoke).
+
+Default regression commands for fan-control changes:
+
+```bash
+pnpm test
+pnpm playwright:test
+cd src-tauri && cargo test
+pnpm biome:check
+```
+
+Optional exploratory UI evidence (not CI):
+
+```bash
+pnpm dev
+agent-browser open http://127.0.0.1:1420 && agent-browser snapshot -i
+```
+
+Gated real-hardware smoke (writes SMC fan settings — never run in CI):
+
+```bash
+FANGUARD_HARDWARE_SMOKE=1 pnpm fan-control:hardware-smoke
+```
+
+Native tray menus are AppKit UI; tray selection logic is tested in Rust (`fan_mode_menu_rows` in `src-tauri/src/tray.rs`). Playwright and agent-browser only drive the main webview.
 
 ## Coding Conventions
 
@@ -151,13 +217,17 @@ pnpm tauri build      # Release bundle
 
 ### Design & UI Guidelines (Brand Guide)
 
-- **Strict Native macOS UI**: The application must look and feel indistinguishable from a first-party macOS system utility (like Activity Monitor) or high-quality native apps (like Macs Fan Control).
-- **Layout**: Use a classic split-pane window layout (Fans on left, Sensors on right). Avoid web-centric "floating cards" or loose spacing. Use edge-to-edge tables.
-- **Controls**: Mimic native macOS controls perfectly. Use native-looking Segmented Controls (connected buttons) for toggles, standard dropdowns, and native push buttons.
-- **Tables**: Use standard macOS table layouts with gray headers, vertical column dividers, and alternating row background colors (zebra striping: `odd:` / `even:`).
-- **Typography**: Strictly use system fonts (`SF Pro Text` for UI, `SF Mono` for data). Maintain high data density with small, crisp typography (e.g., 11px/12px for lists). Ensure tabular numbers (`font-variant-numeric: tabular-nums`) for all metrics.
-- **Icons**: Use SF Symbols for sensor icons (e.g., wifi, battery.100, cpu) to maintain native consistency.
-- **Colors**: Use semantic system colors that automatically adapt to light/dark mode, matching Apple's exact HIG hex values.
+See [docs/design.md](docs/design.md) for the full parchment design system (ElevenLabs palette adapted through Apple HIG geometry).
+
+- **Parchment + Apple HIG**: Warm paper surfaces (`#fdfcfc` canvas, `#f5f3f1` headers) with monochrome ink controls. Light-only — no dark mode.
+- **Strict Native macOS UI**: Indistinguishable from a first-party macOS system utility (Activity Monitor, System Settings). Native window chrome stays OS-provided.
+- **Layout**: Classic split-pane window (Fans left, Sensors right). Edge-to-edge hairline-divided panes — no floating web cards.
+- **Controls**: HIG push buttons (7px radius), segmented controls for toggles (Auto/Custom), pop-up button for presets, HIG dialog panels (~10px).
+- **Tables**: macOS table layouts with warm-sand headers, vertical column dividers, hairline row separators (no zebra striping).
+- **Typography**: SF Pro Text (UI), SF Mono (data, tabular-nums). DM Sans 300 for display headings only.
+- **Icons**: lucide-svelte outlined icons, monochrome (Driftwood/Ink) — no multicolor.
+- **Colors**: Monochrome chrome. Ember `#ff4704` reserved exclusively for hot temperature (≥85°C) safety signals. No green/yellow/red semantic UI colors.
+- **Styling**: Tailwind CSS v4 utility classes + shared `cn()` helper. Tokens live in `src/app.css` `:root` and `@theme`.
 
 ### Tauri Commands
 

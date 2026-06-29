@@ -1,6 +1,6 @@
 # FanGuard Release Guide
 
-How to publish a new release of FanGuard via GitHub Releases and Homebrew.
+How to publish FanGuard via GitHub Releases/Homebrew and how to create the TestFlight/App Store Connect build.
 
 ## Prerequisites
 
@@ -71,6 +71,12 @@ The `release.yml` workflow triggers on any `v*` tag push. It:
 - Generates `latest.json` for the auto-updater
 - Marks it as a prerelease (for beta tags)
 
+Local direct-distribution builds that need the helper should use:
+
+```bash
+pnpm tauri:build:direct
+```
+
 ### 4. Publish the draft release
 
 1. Go to [GitHub Releases](https://github.com/naufaldi/mac-fan-ctrl/releases)
@@ -138,3 +144,37 @@ If upgrade is skipped with "tap trust is required", run `brew trust naufaldi/tap
 - Release artifacts must be Developer ID signed and notarized before publishing. Gatekeeper should report `accepted`.
 - For proper Gatekeeper support, the Apple Developer ID certificate must be exported with its private key as a `.p12` for CI.
 - The `latest.json` file uploaded to releases enables the in-app auto-updater to detect new versions.
+
+## TestFlight / App Store Connect
+
+The TestFlight build is a separate sandboxed, monitoring-only flavor. It does not bundle or install the privileged helper, does not expose fan RPM write controls, and does not use the GitHub self-updater.
+
+Build the TestFlight-ready `.app` bundle:
+
+```bash
+pnpm tauri:build:testflight
+```
+
+Expected local artifact:
+
+```text
+src-tauri/target/release/bundle/macos/FanGuard.app
+```
+
+External Apple prerequisites for upload:
+
+- App Store Connect app record with bundle id `io.github.naufaldi.fanguard`
+- Apple Distribution certificate
+- Mac App Store provisioning profile for the bundle id
+- 3rd Party Mac Developer Installer certificate for the upload package
+
+Package for App Store Connect after the `.app` is signed with the Apple Distribution identity:
+
+```bash
+xcrun productbuild \
+  --component src-tauri/target/release/bundle/macos/FanGuard.app /Applications \
+  --sign "3rd Party Mac Developer Installer: Your Name (TEAM_ID)" \
+  FanGuard-TestFlight.pkg
+```
+
+Then upload `FanGuard-TestFlight.pkg` with Transporter or the App Store Connect upload flow.

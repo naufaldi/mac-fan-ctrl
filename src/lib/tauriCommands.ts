@@ -148,6 +148,8 @@ export async function listenToPowerSourceChanges(
 
 export interface PrivilegeStatus {
 	has_write_access: boolean;
+	fan_control_available: boolean;
+	reason: string | null;
 }
 
 export async function getPrivilegeStatus(): Promise<PrivilegeStatus> {

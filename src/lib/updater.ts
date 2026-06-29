@@ -1,5 +1,6 @@
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
+import { isAppStoreDistribution } from "./distribution";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -14,16 +15,24 @@ interface UpToDate {
 	readonly status: "up-to-date";
 }
 
+interface ManagedByAppStore {
+	readonly status: "managed-by-app-store";
+}
+
 interface UpdateError {
 	readonly status: "error";
 	readonly message: string;
 }
 
-export type UpdateCheckResult = UpdateAvailable | UpToDate | UpdateError;
+export type UpdateCheckResult = UpdateAvailable | UpToDate | ManagedByAppStore | UpdateError;
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export async function checkForUpdate(): Promise<UpdateCheckResult> {
+	if (isAppStoreDistribution()) {
+		return { status: "managed-by-app-store" };
+	}
+
 	try {
 		const update = await check();
 
