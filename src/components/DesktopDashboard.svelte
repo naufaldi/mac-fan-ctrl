@@ -2,15 +2,14 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "$lib/cn";
 import type { SensorData as DesignTokenSensor } from "$lib/designTokens";
+import { isAppStoreDistribution } from "$lib/distribution";
 import {
 	getPrivilegeStatus,
-	getTrayDisplayMode,
 	hideToMenuBar,
 	installHelper,
 	listenCheckForUpdates,
 	listenShowAbout,
 	reconnectWriter,
-	setTrayDisplayMode,
 } from "$lib/tauriCommands";
 import type { SensorData } from "$lib/types";
 import AboutDialog from "./AboutDialog.svelte";
@@ -29,17 +28,28 @@ const { fans, sensorData }: Props = $props();
 
 const rawFans = $derived(sensorData?.fans ?? []);
 const sensors = $derived(sensorData?.details ?? []);
+const fanControlRevision = $derived(
+	sensorData?.fans
+		.map((fan) => `${fan.index}:${fan.mode}:${Math.round(fan.target)}`)
+		.join("|") ?? "",
+);
 
 let hasWriteAccess: boolean = $state(false);
+let fanControlAvailable: boolean = $state(!isAppStoreDistribution());
 let bannerMessage: string = $state("Fan control requires elevated privileges.");
 
 $effect(() => {
 	getPrivilegeStatus()
 		.then((status) => {
 			hasWriteAccess = status.has_write_access;
+			fanControlAvailable = status.fan_control_available;
+			if (status.reason) {
+				bannerMessage = status.reason;
+			}
 		})
 		.catch(() => {
 			hasWriteAccess = false;
+			fanControlAvailable = !isAppStoreDistribution();
 		});
 });
 
@@ -65,8 +75,6 @@ let showPreferences: boolean = $state(false);
 let showAbout: boolean = $state(false);
 let showUpdate: boolean = $state(false);
 let alwaysOnTop: boolean = $state(false);
-
-let trayDisplayMode: number = $state(0);
 
 async function handleAlwaysOnTop(): Promise<void> {
 	try {
@@ -106,35 +114,23 @@ async function handleHideToMenuBar(): Promise<void> {
 	}
 }
 
-async function handlePreferences(): Promise<void> {
-	try {
-		trayDisplayMode = await getTrayDisplayMode();
-	} catch {
-		trayDisplayMode = 0;
-	}
+function handlePreferences(): void {
 	showPreferences = true;
 }
 
-async function handleTrayModeChange(mode: number): Promise<void> {
-	trayDisplayMode = mode;
-	try {
-		await setTrayDisplayMode(mode);
-	} catch (error) {
-		console.error("[DesktopDashboard] Failed to set tray display mode:", error);
-	}
-}
-
 const chromeButtonClass =
-	"rounded-[5px] border border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#3a3a3a] px-3 py-1 text-[12px] text-(--text-primary) shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-colors hover:bg-gray-50 dark:hover:bg-[#444] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
+	"rounded-(--radius-button) border border-(--border-subtle) bg-(--surface-elevated) px-3 py-1 text-[12px] text-(--text-primary) shadow-(--shadow-hairline) transition-colors hover:bg-(--surface-2) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-1 focus-visible:ring-offset-(--focus-ring-offset)";
+const chromeButtonActiveClass =
+	"border-(--control-active-border) bg-(--control-active-bg) text-(--control-active-text) font-medium shadow-none";
 </script>
 
 <section
-  class={cn("flex h-full w-full flex-col overflow-hidden bg-[#ececec] dark:bg-[#1e1e1e] text-(--text-primary)")}
+  class={cn("flex h-full w-full flex-col overflow-hidden bg-(--surface-0) text-(--text-primary)")}
 >
-  {#if !hasWriteAccess}
+  {#if !hasWriteAccess && fanControlAvailable}
     <div
       class={cn(
-        "flex shrink-0 items-center justify-center gap-2 border-b border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 px-4 py-1.5 text-[11px] text-amber-800 dark:text-amber-200"
+        "flex shrink-0 items-center justify-center gap-2 border-b border-ember-orange/40 bg-(--surface-2) px-4 py-1.5 text-[11px] text-(--text-primary)"
       )}
     >
       <span>{bannerMessage}</span>
@@ -142,7 +138,7 @@ const chromeButtonClass =
         <button
           type="button"
           class={cn(
-            "rounded-[4px] border border-amber-400 dark:border-amber-600 bg-amber-100 dark:bg-amber-800/50 px-2 py-0.5 text-[11px] font-medium text-amber-900 dark:text-amber-100 hover:bg-amber-200 dark:hover:bg-amber-700/50 transition-colors"
+            "rounded-(--radius-button) border border-(--border-subtle) bg-(--surface-elevated) px-2 py-0.5 text-[11px] font-medium text-(--text-primary) shadow-(--shadow-hairline) hover:bg-(--surface-2) transition-colors"
           )}
           onclick={handleGrantAccess}
         >
@@ -154,27 +150,33 @@ const chromeButtonClass =
 
   <header
     class={cn(
-      "flex shrink-0 items-center justify-center gap-2 border-b border-gray-300 dark:border-black/50 bg-[#ececec] dark:bg-[#2d2d2d] px-4 py-2"
+      "flex shrink-0 items-center justify-center gap-2 border-b border-(--border-subtle) bg-(--surface-0) px-4 py-2"
     )}
   >
-    <span class={cn("text-[12px] text-(--text-secondary)")}>Active preset:</span>
-    <PresetDropdown />
+    {#if fanControlAvailable}
+      <span class={cn("text-[12px] text-(--text-secondary)")}>Active preset:</span>
+      <PresetDropdown />
+    {:else}
+      <span class={cn("text-[12px] text-(--text-secondary)")}>Monitoring only</span>
+    {/if}
   </header>
 
-  <div class={cn("grid min-h-0 grow grid-cols-[1fr_300px] overflow-hidden bg-white dark:bg-[#1e1e1e]")}>
-    <FanControlPane {fans} {rawFans} {sensors} {hasWriteAccess} />
+  <div class={cn("grid min-h-0 grow grid-cols-[1fr_300px] overflow-hidden bg-(--surface-1)")}>
+    {#key fanControlRevision}
+      <FanControlPane {fans} {rawFans} {sensors} {hasWriteAccess} {fanControlAvailable} />
+    {/key}
     <SensorListPane {sensorData} />
   </div>
 
   <footer
     class={cn(
-      "flex shrink-0 items-center gap-2 border-t border-gray-300 dark:border-black/50 bg-[#ececec] dark:bg-[#2d2d2d] px-4 py-2"
+      "flex shrink-0 items-center gap-2 border-t border-(--border-subtle) bg-(--surface-0) px-4 py-2"
     )}
   >
     <button
       class={cn(
         chromeButtonClass,
-        alwaysOnTop && "border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300"
+        alwaysOnTop && chromeButtonActiveClass
       )}
       type="button"
       aria-label={alwaysOnTop ? "Unpin window" : "Pin window on top"}
@@ -190,16 +192,18 @@ const chromeButtonClass =
     <button class={cn(chromeButtonClass)} type="button" onclick={handlePreferences}>
       Preferences...
     </button>
-    <button class={cn(chromeButtonClass)} type="button" onclick={() => { showUpdate = true; }}>
-      Check for Updates
-    </button>
+    {#if !isAppStoreDistribution()}
+      <button class={cn(chromeButtonClass)} type="button" onclick={() => { showUpdate = true; }}>
+        Check for Updates
+      </button>
+    {/if}
     <button class={cn(chromeButtonClass)} type="button" aria-label="About" onclick={() => { showAbout = true; }}>
       About
     </button>
   </footer>
 
   {#if showPreferences}
-    <PreferencesDialog onclose={() => { showPreferences = false; }} />
+    <PreferencesDialog {fanControlAvailable} onclose={() => { showPreferences = false; }} />
   {/if}
 
   {#if showAbout}
@@ -210,70 +214,3 @@ const chromeButtonClass =
     <UpdateDialog onclose={() => { showUpdate = false; }} />
   {/if}
 </section>
-
-<!-- Preferences modal -->
-{#if showPreferences}
-  <div class={cn('fixed inset-0 z-50 flex items-center justify-center')}>
-    <button
-      type="button"
-      class={cn('absolute inset-0 bg-black/30 cursor-default')}
-      onclick={() => { showPreferences = false; }}
-      aria-label="Close preferences"
-      tabindex="-1"
-    ></button>
-    <div
-      class={cn(
-        'relative w-[340px] rounded-lg border border-gray-300 dark:border-[#4a4a4a] bg-[#ececec] dark:bg-[#2d2d2d] shadow-2xl'
-      )}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Preferences"
-    >
-      <div class={cn('px-6 pt-5 pb-4')}>
-        <h2 class={cn('text-[13px] font-semibold text-(--text-primary) mb-4')}>Preferences</h2>
-
-        <div class={cn('space-y-3')}>
-          <div>
-            <p class={cn('text-[12px] font-medium text-(--text-primary) mb-2')}>Menu bar display</p>
-            <div class={cn('flex gap-0 rounded-[5px] border border-gray-300 dark:border-[#4a4a4a] overflow-hidden')}>
-              <button
-                type="button"
-                class={cn(
-                  'flex-1 px-3 py-1.5 text-[12px] transition-colors',
-                  trayDisplayMode === 0
-                    ? 'bg-blue-500 text-white font-medium'
-                    : 'bg-white dark:bg-[#3a3a3a] text-(--text-primary) hover:bg-gray-50 dark:hover:bg-[#444]'
-                )}
-                onclick={() => handleTrayModeChange(0)}
-              >
-                CPU Temperature
-              </button>
-              <button
-                type="button"
-                class={cn(
-                  'flex-1 px-3 py-1.5 text-[12px] border-l border-gray-300 dark:border-[#4a4a4a] transition-colors',
-                  trayDisplayMode === 1
-                    ? 'bg-blue-500 text-white font-medium'
-                    : 'bg-white dark:bg-[#3a3a3a] text-(--text-primary) hover:bg-gray-50 dark:hover:bg-[#444]'
-                )}
-                onclick={() => handleTrayModeChange(1)}
-              >
-                Fan RPM
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class={cn('flex justify-end px-6 pb-5')}>
-        <button
-          type="button"
-          class="rounded-[5px] border border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#3a3a3a] px-4 py-1.5 text-[12px] text-(--text-primary) shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-gray-50 dark:hover:bg-[#444]"
-          onclick={() => { showPreferences = false; }}
-        >
-          Done
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}

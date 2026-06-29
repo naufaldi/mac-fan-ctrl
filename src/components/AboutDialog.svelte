@@ -62,7 +62,7 @@ function handleKeydown(event: KeyboardEvent): void {
 }
 
 const buttonBase =
-	"cursor-pointer rounded-[5px] border px-4 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
+	"cursor-pointer rounded-(--radius-button) border px-4 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-1 focus-visible:ring-offset-(--focus-ring-offset)";
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -73,7 +73,7 @@ const buttonBase =
 >
   <button
     type="button"
-    class={cn('absolute inset-0 bg-black/30 backdrop-blur-[1px] cursor-default')}
+    class={cn('absolute inset-0 bg-black/20 backdrop-blur-[1px] cursor-default')}
     onclick={onclose}
     aria-label="Close dialog"
     tabindex="-1"
@@ -82,7 +82,7 @@ const buttonBase =
   <div
     bind:this={dialogEl}
     class={cn(
-      'relative w-[320px] rounded-lg border border-gray-300 dark:border-[#4a4a4a] bg-[#ececec] dark:bg-[#2d2d2d] shadow-2xl'
+      'relative w-[320px] rounded-(--radius-dialog) border border-(--border-subtle) bg-(--surface-elevated) shadow-(--shadow-elevated)'
     )}
     role="dialog"
     aria-modal="true"
@@ -90,8 +90,8 @@ const buttonBase =
     transition:scale={{ duration: 150, start: 0.95, opacity: 0 }}
   >
     <div class={cn('flex flex-col items-center px-6 pt-6 pb-2')}>
-      <div class={cn('mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-b from-blue-400 to-blue-600 shadow-lg')}>
-        <svg class="h-8 w-8 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <div class={cn('mb-3 flex h-16 w-16 items-center justify-center rounded-(--radius-card) border border-(--border-subtle) bg-(--surface-2)')}>
+        <svg class="h-8 w-8 text-(--text-primary)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0" />
           <path d="M12 2v4" />
           <path d="M12 18v4" />
@@ -104,7 +104,7 @@ const buttonBase =
         </svg>
       </div>
 
-      <h2 class={cn('text-[14px] font-semibold text-(--text-primary)')}>
+      <h2 class={cn('font-[family-name:var(--font-display)] text-[20px] font-light tracking-tight text-(--text-primary)')}>
         {appInfo?.name ?? "FanGuard"}
       </h2>
 
@@ -117,7 +117,7 @@ const buttonBase =
       <p class={cn('text-[11px] text-(--text-muted)')}>MIT License</p>
       <button
         type="button"
-        class={cn('text-[11px] text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 hover:underline cursor-pointer')}
+        class={cn('text-[11px] text-(--text-secondary) hover:text-(--text-primary) hover:underline cursor-pointer')}
         onclick={handleGitHub}
       >
         View on GitHub
@@ -130,7 +130,7 @@ const buttonBase =
         bind:this={closeButtonEl}
         class={cn(
           buttonBase,
-          'border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#3a3a3a] text-(--text-primary) shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-gray-50 dark:hover:bg-[#444]'
+          'border-(--border-subtle) bg-(--surface-elevated) text-(--text-primary) shadow-(--shadow-hairline) hover:bg-(--surface-2)'
         )}
         onclick={onclose}
       >

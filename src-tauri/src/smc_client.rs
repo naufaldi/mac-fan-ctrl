@@ -16,25 +16,27 @@ impl SmcSocketClient {
 
     pub fn with_path(path: &str) -> Result<Self, SmcWriteError> {
         let socket_path = PathBuf::from(path);
-        let stream = UnixStream::connect(&socket_path)
-            .map_err(|_| SmcWriteError::HelperNotRunning)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        let stream =
+            UnixStream::connect(&socket_path).map_err(|_| SmcWriteError::HelperNotRunning)?;
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
             .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
-        stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))
+        stream
+            .set_write_timeout(Some(std::time::Duration::from_secs(5)))
             .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
         let response = send_request_on(&stream, &HelperRequest::Ping)?;
         match response {
             HelperResponse::Pong => Ok(Self { socket_path }),
-            HelperResponse::Error { message } => {
-                Err(SmcWriteError::HelperError(message))
-            }
-            _ => Err(SmcWriteError::HelperError("unexpected ping response".to_string())),
+            HelperResponse::Error { message } => Err(SmcWriteError::HelperError(message)),
+            _ => Err(SmcWriteError::HelperError(
+                "unexpected ping response".to_string(),
+            )),
         }
     }
 
     fn send_request(&self, request: &HelperRequest) -> Result<HelperResponse, SmcWriteError> {
-        let stream = UnixStream::connect(&self.socket_path)
-            .map_err(|_| SmcWriteError::HelperNotRunning)?;
+        let stream =
+            UnixStream::connect(&self.socket_path).map_err(|_| SmcWriteError::HelperNotRunning)?;
         send_request_on(&stream, request)
     }
 }
@@ -43,31 +45,37 @@ fn send_request_on(
     stream: &UnixStream,
     request: &HelperRequest,
 ) -> Result<HelperResponse, SmcWriteError> {
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
         .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
-    stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))
+    stream
+        .set_write_timeout(Some(std::time::Duration::from_secs(5)))
         .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
-    let mut writer = stream.try_clone()
+    let mut writer = stream
+        .try_clone()
         .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
-    let mut line = serde_json::to_string(request)
-        .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
+    let mut line =
+        serde_json::to_string(request).map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
     line.push('\n');
-    writer.write_all(line.as_bytes())
+    writer
+        .write_all(line.as_bytes())
         .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
 
     let mut reader = BufReader::new(stream);
     let mut response_line = String::new();
-    reader.read_line(&mut response_line)
+    reader
+        .read_line(&mut response_line)
         .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
-    serde_json::from_str(&response_line)
-        .map_err(|e| SmcWriteError::HelperError(e.to_string()))
+    serde_json::from_str(&response_line).map_err(|e| SmcWriteError::HelperError(e.to_string()))
 }
 
 fn response_to_result(response: HelperResponse) -> Result<(), SmcWriteError> {
     match response {
         HelperResponse::Ok => Ok(()),
         HelperResponse::Error { message } => Err(SmcWriteError::HelperError(message)),
-        _ => Err(SmcWriteError::HelperError("unexpected response type".to_string())),
+        _ => Err(SmcWriteError::HelperError(
+            "unexpected response type".to_string(),
+        )),
     }
 }
 
@@ -129,11 +137,18 @@ mod tests {
         let listener = UnixListener::bind(&sock_path).unwrap();
         let handle = std::thread::spawn(move || {
             for stream in listener.incoming().take(5) {
-                let stream = match stream { Ok(s) => s, Err(_) => break };
+                let stream = match stream {
+                    Ok(s) => s,
+                    Err(_) => break,
+                };
                 let mut reader = BufReader::new(&stream);
                 let mut line = String::new();
-                if reader.read_line(&mut line).is_err() { break; }
-                if line.is_empty() { continue; }
+                if reader.read_line(&mut line).is_err() {
+                    break;
+                }
+                if line.is_empty() {
+                    continue;
+                }
                 let request: HelperRequest = match serde_json::from_str(&line) {
                     Ok(r) => r,
                     Err(_) => continue,
@@ -155,7 +170,9 @@ mod tests {
         with_mock_helper(
             |req| match req {
                 HelperRequest::Ping => HelperResponse::Pong,
-                _ => HelperResponse::Error { message: "unexpected".into() },
+                _ => HelperResponse::Error {
+                    message: "unexpected".into(),
+                },
             },
             |path| {
                 let client = SmcSocketClient::with_path(path);
@@ -170,7 +187,9 @@ mod tests {
             |req| match req {
                 HelperRequest::Ping => HelperResponse::Pong,
                 HelperRequest::SetFanAuto { fan_index: 0 } => HelperResponse::Ok,
-                _ => HelperResponse::Error { message: "unexpected".into() },
+                _ => HelperResponse::Error {
+                    message: "unexpected".into(),
+                },
             },
             |path| {
                 let client = SmcSocketClient::with_path(path).unwrap();
@@ -188,13 +207,18 @@ mod tests {
                 HelperRequest::SetFanAuto { .. } => HelperResponse::Error {
                     message: "Insufficient privileges".into(),
                 },
-                _ => HelperResponse::Error { message: "unexpected".into() },
+                _ => HelperResponse::Error {
+                    message: "unexpected".into(),
+                },
             },
             |path| {
                 let client = SmcSocketClient::with_path(path).unwrap();
                 let result = client.set_fan_auto(0);
                 assert!(result.is_err());
-                assert!(result.unwrap_err().to_string().contains("Insufficient privileges"));
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("Insufficient privileges"));
             },
         );
     }

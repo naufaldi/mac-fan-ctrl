@@ -8,6 +8,7 @@ A native macOS fan control utility built with Tauri v2 (Rust backend) and Svelte
 
 - Real-time temperature monitoring via SMC and IOKit sensors
 - Per-fan speed control: automatic, constant RPM, or sensor-based curves
+- TestFlight/App Store build path with sandboxed monitoring-only behavior
 - Menu bar tray with live CPU temperature display
 - Custom preset save/restore
 - Emergency thermal override safety system
@@ -60,6 +61,12 @@ cd src-tauri && cargo test
 
 # Lint
 pnpm biome:check
+
+# Direct Developer ID/Homebrew build flavor
+pnpm tauri:build:direct
+
+# TestFlight/App Store Connect build flavor
+pnpm tauri:build:testflight
 ```
 
 ### Prerequisites

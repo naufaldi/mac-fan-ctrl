@@ -1,4 +1,5 @@
 <script lang="ts">
+import { Check, X } from "lucide-svelte";
 import { cn } from "$lib/cn";
 import {
 	applyPreset,
@@ -9,8 +10,6 @@ import {
 } from "$lib/tauriCommands";
 import type { Preset } from "$lib/types";
 
-// ── State ──────────────────────────────────────────────────────────────────
-
 let presets: Preset[] = $state([]);
 let activePresetName: string = $state("Automatic");
 let isOpen: boolean = $state(false);
@@ -20,8 +19,6 @@ let saveError: string = $state("");
 let applyError: string = $state("");
 let deleteError: string = $state("");
 let focusedIndex: number = $state(-1);
-
-// ── Load presets ───────────────────────────────────────────────────────────
 
 async function refreshPresets(): Promise<void> {
 	try {
@@ -39,8 +36,6 @@ async function refreshPresets(): Promise<void> {
 $effect(() => {
 	void refreshPresets();
 });
-
-// ── Handlers ───────────────────────────────────────────────────────────────
 
 function toggleDropdown(): void {
 	isOpen = !isOpen;
@@ -117,7 +112,6 @@ async function handleDeletePreset(
 	}
 }
 
-// -- Derived --
 const builtinPresets = $derived(presets.filter((p) => p.builtin));
 const customPresets = $derived(presets.filter((p) => !p.builtin));
 const allMenuItems = $derived([...builtinPresets, ...customPresets]);
@@ -131,7 +125,7 @@ function handleKeydown(event: KeyboardEvent): void {
 
 	if (!isOpen) return;
 
-	const itemCount = allMenuItems.length + 1; // +1 for "Save current as..."
+	const itemCount = allMenuItems.length + 1;
 
 	if (event.key === "ArrowDown") {
 		event.preventDefault();
@@ -155,18 +149,31 @@ function handleKeydown(event: KeyboardEvent): void {
 	}
 }
 
-const chromeButtonClass =
-	"rounded-[5px] border border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#3a3a3a] px-3 py-1 text-[12px] text-(--text-primary) shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-colors hover:bg-gray-50 dark:hover:bg-[#444] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
+const popupButtonClass =
+	"rounded-(--radius-button) border border-(--border-subtle) bg-(--surface-elevated) px-3 py-1 text-[12px] text-(--text-primary) shadow-(--shadow-hairline) transition-colors hover:bg-(--surface-2) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-1 focus-visible:ring-offset-(--focus-ring-offset)";
 
 const dropdownItemClass =
-	"w-full text-left px-3 py-1.5 text-[12px] text-(--text-primary) hover:bg-blue-500 hover:text-white transition-colors flex items-center justify-between";
+	"w-full text-left px-3 py-1.5 text-[12px] text-(--text-primary) hover:bg-(--surface-2) transition-colors flex items-center justify-between";
+
+const buttonBase =
+	"cursor-pointer rounded-(--radius-button) border px-4 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-1 focus-visible:ring-offset-(--focus-ring-offset)";
+
+const cancelButton = cn(
+	buttonBase,
+	"border-(--border-subtle) bg-(--surface-elevated) text-(--text-primary) shadow-(--shadow-hairline) hover:bg-(--surface-2)",
+);
+
+const primaryButton = cn(
+	buttonBase,
+	"border-(--control-active-border) bg-(--control-active-bg) text-(--control-active-text) disabled:opacity-50",
+);
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="relative">
   <button
-    class={cn(chromeButtonClass)}
+    class={cn(popupButtonClass)}
     type="button"
     onclick={toggleDropdown}
     aria-haspopup="menu"
@@ -177,93 +184,87 @@ const dropdownItemClass =
   </button>
 
   {#if isOpen}
-    <!-- Backdrop -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="fixed inset-0 z-40" onclick={closeDropdown}></div>
 
-    <!-- Dropdown menu -->
     <div
       role="menu"
       aria-label="Fan presets"
       class={cn(
-        'absolute top-full left-0 mt-1 z-50 min-w-[200px] rounded-md border border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#2d2d2d] shadow-lg overflow-hidden'
+        'absolute top-full left-0 mt-1 z-50 min-w-[200px] rounded-(--radius-dialog) border border-(--border-subtle) bg-(--surface-elevated) shadow-(--shadow-elevated) overflow-hidden'
       )}
     >
-      <!-- Built-in presets -->
       {#each builtinPresets as preset, i (preset.name)}
         <button
           type="button"
           role="menuitem"
           class={cn(
             dropdownItemClass,
-            preset.name === activePresetName ? 'font-semibold' : '',
-            focusedIndex === i ? 'bg-blue-500 text-white' : ''
+            preset.name === activePresetName ? 'font-medium' : '',
+            focusedIndex === i ? 'bg-(--surface-2)' : ''
           )}
           onclick={() => handleApplyPreset(preset.name)}
         >
           <span>{preset.name}</span>
           {#if preset.name === activePresetName}
-            <span class="text-[10px]">✓</span>
+            <Check size={12} class="text-(--text-primary)" aria-hidden="true" />
           {/if}
         </button>
       {/each}
 
-      <!-- Separator + custom presets -->
       {#if customPresets.length > 0}
-        <div class="border-t border-gray-200 dark:border-[#4a4a4a]"></div>
+        <div class="border-t border-(--border-subtle)"></div>
         {#each customPresets as preset, i (preset.name)}
           <button
             type="button"
             role="menuitem"
             class={cn(
               dropdownItemClass,
-              preset.name === activePresetName ? 'font-semibold' : '',
-              focusedIndex === builtinPresets.length + i ? 'bg-blue-500 text-white' : ''
+              preset.name === activePresetName ? 'font-medium' : '',
+              focusedIndex === builtinPresets.length + i ? 'bg-(--surface-2)' : ''
             )}
             onclick={() => handleApplyPreset(preset.name)}
           >
             <span>{preset.name}</span>
             <span class="flex items-center gap-1">
               {#if preset.name === activePresetName}
-                <span class="text-[10px]">✓</span>
+                <Check size={12} class="text-(--text-primary)" aria-hidden="true" />
               {/if}
               <span
                 role="button"
                 tabindex="0"
-                class="text-[10px] text-gray-400 hover:text-red-500 px-1 cursor-pointer"
+                class="text-(--text-muted) hover:text-(--text-primary) px-1 cursor-pointer"
                 onclick={(e) => handleDeletePreset(preset.name, e)}
                 onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleDeletePreset(preset.name, e); }}
                 aria-label={`Delete preset ${preset.name}`}
               >
-                ✕
+                <X size={12} aria-hidden="true" />
               </span>
             </span>
           </button>
         {/each}
       {/if}
 
-      <!-- Apply/delete errors -->
       {#if applyError}
-        <div class={cn("px-3 py-1.5")}>
-          <p class={cn("text-[11px] text-red-500 dark:text-red-400")}>{applyError}</p>
+        <div class={cn("px-3 py-1.5 border-t border-(--border-subtle)")}>
+          <p class={cn("text-[11px] text-(--text-secondary)")}>{applyError}</p>
         </div>
       {/if}
       {#if deleteError}
-        <div class={cn("px-3 py-1.5")}>
-          <p class={cn("text-[11px] text-red-500 dark:text-red-400")}>{deleteError}</p>
+        <div class={cn("px-3 py-1.5 border-t border-(--border-subtle)")}>
+          <p class={cn("text-[11px] text-(--text-secondary)")}>{deleteError}</p>
         </div>
       {/if}
 
-      <!-- Save current -->
-      <div class="border-t border-gray-200 dark:border-[#4a4a4a]"></div>
+      <div class="border-t border-(--border-subtle)"></div>
       <button
         type="button"
         role="menuitem"
         class={cn(
           dropdownItemClass,
           'text-(--text-muted)',
-          focusedIndex === allMenuItems.length ? 'bg-blue-500 text-white' : ''
+          focusedIndex === allMenuItems.length ? 'bg-(--surface-2)' : ''
         )}
         onclick={openSaveDialog}
       >
@@ -273,21 +274,23 @@ const dropdownItemClass =
   {/if}
 </div>
 
-<!-- Save dialog (mini-modal) -->
 {#if isSaveDialogOpen}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
     onclick={() => { isSaveDialogOpen = false; }}
   >
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class={cn(
-        'w-[300px] rounded-lg border border-gray-300 dark:border-[#4a4a4a] bg-[#ececec] dark:bg-[#2d2d2d] shadow-2xl p-5'
+        'w-[300px] rounded-(--radius-dialog) border border-(--border-subtle) bg-(--surface-elevated) shadow-(--shadow-elevated) p-5'
       )}
       onclick={(e) => e.stopPropagation()}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Save preset"
     >
       <h3 class="text-[13px] font-semibold text-(--text-primary) mb-3">Save Preset</h3>
       <input
@@ -296,25 +299,25 @@ const dropdownItemClass =
         placeholder="Preset name"
         aria-label="Preset name"
         class={cn(
-          'w-full rounded-[4px] border bg-white dark:bg-[#2a2a2a] px-2 py-1.5 text-[12px] text-(--text-primary) focus:outline-none focus:ring-2 focus:ring-blue-500',
-          saveError ? 'border-red-400 dark:border-red-500 mb-1' : 'border-gray-300 dark:border-[#4a4a4a] mb-3'
+          'w-full rounded-(--radius-input) border bg-(--surface-elevated) px-2 py-1.5 text-[12px] text-(--text-primary) focus:outline-none focus:ring-2 focus:ring-(--focus-ring)',
+          saveError ? 'border-(--color-ember-orange) mb-1' : 'border-(--border-subtle) mb-3'
         )}
         onkeydown={(e) => { if (e.key === 'Enter') { void handleSavePreset(); } }}
       />
       {#if saveError}
-        <p class="text-[11px] text-red-500 dark:text-red-400 mb-2">{saveError}</p>
+        <p class="text-[11px] text-(--text-secondary) mb-2">{saveError}</p>
       {/if}
       <div class="flex justify-end gap-2">
         <button
           type="button"
-          class={cn(chromeButtonClass)}
+          class={cancelButton}
           onclick={() => { isSaveDialogOpen = false; }}
         >
           Cancel
         </button>
         <button
           type="button"
-          class="rounded-[5px] border border-blue-500 bg-blue-500 px-3 py-1 text-[12px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
+          class={primaryButton}
           disabled={savePresetName.trim().length === 0}
           onclick={handleSavePreset}
         >

@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::alerts::{self, AlertConfig};
 use crate::fan_control::{FanControlConfig, FanControlState};
+use crate::fan_snapshot;
+use crate::helper_binary;
 use crate::log::{debug_log, warn_log};
 use crate::power_monitor::PowerSource;
 use crate::power_presets::{self, PowerPresetConfig};
@@ -41,7 +43,16 @@ fn should_try_direct_smc_writer(euid: u32) -> bool {
     euid == 0
 }
 
+pub fn distribution_allows_fan_control() -> bool {
+    !cfg!(feature = "app-store")
+}
+
 fn create_smc_writer() -> Option<Box<dyn SmcWriteApi>> {
+    if !distribution_allows_fan_control() {
+        debug_log!("[fanguard] Fan control writer disabled for App Store/TestFlight build");
+        return None;
+    }
+
     let running_as_root = should_try_direct_smc_writer(unsafe { libc::geteuid() });
 
     if running_as_root {
@@ -72,9 +83,7 @@ fn create_smc_writer() -> Option<Box<dyn SmcWriteApi>> {
 
     // Unprivileged direct connections can open AppleSMC for reads but fan
     // control keys (F*nMd) return "Unknown key" — do not use as a fallback.
-    warn_log!(
-        "[fanguard] Fan control disabled — install the privileged helper for write access"
-    );
+    warn_log!("[fanguard] Fan control disabled — install the privileged helper for write access");
     None
 }
 
@@ -106,8 +115,14 @@ pub struct AppInfo {
 pub fn get_app_info(app_handle: tauri::AppHandle) -> Result<AppInfo, String> {
     let config = app_handle.config();
     Ok(AppInfo {
-        name: config.product_name.clone().unwrap_or_else(|| "FanGuard".to_string()),
-        version: config.version.clone().unwrap_or_else(|| "0.0.0".to_string()),
+        name: config
+            .product_name
+            .clone()
+            .unwrap_or_else(|| "FanGuard".to_string()),
+        version: config
+            .version
+            .clone()
+            .unwrap_or_else(|| "0.0.0".to_string()),
         identifier: config.identifier.clone(),
     })
 }
@@ -136,61 +151,100 @@ pub fn ping_backend(message: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn get_sensors() -> Result<crate::smc::SensorData, String> {
+pub fn get_sensors(app_handle: AppHandle) -> Result<crate::smc::SensorData, String> {
     let mut service = SensorService::new();
-    service.read_all_sensors().map_err(|e| e.to_string())
+    let mut sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
+    let state = app_handle.state::<AppState>();
+    fan_snapshot::overlay_fan_control_on_sensors(&state, &mut sensor_data);
+    Ok(sensor_data)
+}
+
+fn finish_fan_control_change(app_handle: &AppHandle) -> Result<(), String> {
+    let state = app_handle.state::<AppState>();
+    let mut service = SensorService::new();
+    let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
+    let fan_indices: Vec<u8> = sensor_data.fans.iter().map(|f| f.index).collect();
+    fan_snapshot::sync_active_preset(&state, &fan_indices)?;
+    fan_snapshot::emit_fan_control_snapshot(app_handle);
+    Ok(())
+}
+
+fn require_writer(
+    state: &AppState,
+) -> Result<std::sync::MutexGuard<'_, Option<Box<dyn SmcWriteApi>>>, String> {
+    if !distribution_allows_fan_control() {
+        return Err("Fan control is disabled in TestFlight builds.".to_string());
+    }
+
+    state.smc_writer.lock().map_err(|e| e.to_string())
+}
+
+fn apply_fan_control_write(
+    state: &AppState,
+    apply: impl FnOnce(&mut FanControlState, &dyn SmcWriteApi) -> Result<(), String>,
+) -> Result<(), String> {
+    let writer_guard = require_writer(state)?;
+    let writer = writer_guard.as_deref().ok_or_else(|| {
+        "Fan control unavailable — grant access to install the privileged helper".to_string()
+    })?;
+    let mut fan_control = state.fan_control.lock().map_err(|e| e.to_string())?;
+
+    apply(&mut fan_control, writer)
+}
+
+pub fn apply_set_fan_constant_rpm(
+    app_handle: &AppHandle,
+    fan_index: u8,
+    rpm: f32,
+) -> Result<(), String> {
+    if fan_index >= 10 {
+        return Err(format!("Invalid fan_index: {fan_index} — must be 0–9"));
+    }
+    if !rpm.is_finite() || rpm <= 0.0 {
+        return Err(format!(
+            "Invalid rpm: {rpm} — must be a positive finite number"
+        ));
+    }
+
+    let state = app_handle.state::<AppState>();
+    let mut service = SensorService::new();
+    let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
+    let config = FanControlConfig::ConstantRpm { target_rpm: rpm };
+    apply_fan_control_write(&state, |control, writer| {
+        control
+            .set_config(fan_index, config, &sensor_data.fans, writer)
+            .map_err(|e| e.to_string())
+    })?;
+
+    finish_fan_control_change(app_handle)
+}
+
+pub fn apply_set_fan_auto(app_handle: &AppHandle, fan_index: u8) -> Result<(), String> {
+    if fan_index >= 10 {
+        return Err(format!("Invalid fan_index: {fan_index} — must be 0–9"));
+    }
+
+    let state = app_handle.state::<AppState>();
+    apply_fan_control_write(&state, |control, writer| {
+        control
+            .set_auto(fan_index, writer)
+            .map_err(|e| e.to_string())
+    })?;
+
+    finish_fan_control_change(app_handle)
 }
 
 // ── Fan control commands ─────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn set_fan_constant_rpm(
-    state: State<'_, AppState>,
-    fan_index: u8,
-    rpm: f32,
-) -> Result<(), String> {
+pub fn set_fan_constant_rpm(app_handle: AppHandle, fan_index: u8, rpm: f32) -> Result<(), String> {
     debug_log!("[cmd] set_fan_constant_rpm: fan_index={fan_index} rpm={rpm}");
-
-    if fan_index >= 10 {
-        return Err(format!("Invalid fan_index: {fan_index} — must be 0–9"));
-    }
-    if !rpm.is_finite() || rpm < 0.0 {
-        return Err(format!("Invalid RPM value: {rpm} — must be a finite non-negative number"));
-    }
-
-    let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
-    let writer = writer_guard
-        .as_deref()
-        .ok_or_else(|| {
-            "Fan control unavailable — grant access to install the privileged helper".to_string()
-        })?;
-
-    let mut service = SensorService::new();
-    let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
-
-    debug_log!(
-        "[cmd] fan data: {:?}",
-        sensor_data
-            .fans
-            .iter()
-            .map(|f| format!("fan{}:min={} max={}", f.index, f.min, f.max))
-            .collect::<Vec<_>>()
-    );
-
-    let config = FanControlConfig::ConstantRpm { target_rpm: rpm };
-    let result = state
-        .fan_control
-        .lock()
-        .map_err(|e| e.to_string())?
-        .set_config(fan_index, config, &sensor_data.fans, writer)
-        .map_err(|e| e.to_string());
-
-    debug_log!("[cmd] set_fan_constant_rpm result: {result:?}");
-    result
+    apply_set_fan_constant_rpm(&app_handle, fan_index, rpm)
 }
 
 #[tauri::command]
 pub fn set_fan_sensor_control(
+    app_handle: AppHandle,
     state: State<'_, AppState>,
     fan_index: u8,
     sensor_key: String,
@@ -209,19 +263,14 @@ pub fn set_fan_sensor_control(
         ));
     }
 
-    let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
-    let writer = writer_guard
-        .as_deref()
-        .ok_or_else(|| {
-            "Fan control unavailable — grant access to install the privileged helper".to_string()
-        })?;
-
     let mut service = SensorService::new();
     let sensor_data = service.read_all_sensors().map_err(|e| e.to_string())?;
 
     let sensor_exists = sensor_data.details.iter().any(|s| s.key == sensor_key);
     if !sensor_exists {
-        return Err(format!("Sensor key '{sensor_key}' not found in current sensor list"));
+        return Err(format!(
+            "Sensor key '{sensor_key}' not found in current sensor list"
+        ));
     }
 
     let config = FanControlConfig::SensorBased {
@@ -229,32 +278,18 @@ pub fn set_fan_sensor_control(
         temp_low,
         temp_high,
     };
-    state
-        .fan_control
-        .lock()
-        .map_err(|e| e.to_string())?
-        .set_config(fan_index, config, &sensor_data.fans, writer)
-        .map_err(|e| e.to_string())
+    apply_fan_control_write(&state, |control, writer| {
+        control
+            .set_config(fan_index, config, &sensor_data.fans, writer)
+            .map_err(|e| e.to_string())
+    })?;
+
+    finish_fan_control_change(&app_handle)
 }
 
 #[tauri::command]
-pub fn set_fan_auto(state: State<'_, AppState>, fan_index: u8) -> Result<(), String> {
-    if fan_index >= 10 {
-        return Err(format!("Invalid fan_index: {fan_index} — must be 0–9"));
-    }
-    let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
-    let writer = writer_guard
-        .as_deref()
-        .ok_or_else(|| {
-            "Fan control unavailable — grant access to install the privileged helper".to_string()
-        })?;
-
-    state
-        .fan_control
-        .lock()
-        .map_err(|e| e.to_string())?
-        .set_auto(fan_index, writer)
-        .map_err(|e| e.to_string())
+pub fn set_fan_auto(app_handle: AppHandle, fan_index: u8) -> Result<(), String> {
+    apply_set_fan_auto(&app_handle, fan_index)
 }
 
 #[tauri::command]
@@ -289,12 +324,16 @@ pub fn get_active_preset(state: State<'_, AppState>) -> Result<Option<String>, S
 
 #[tauri::command]
 pub fn apply_preset(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    if !distribution_allows_fan_control() {
+        return Err(
+            "Fan presets that change fan speed are disabled in TestFlight builds.".to_string(),
+        );
+    }
+
     let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
-    let writer = writer_guard
-        .as_deref()
-        .ok_or_else(|| {
-            "Fan control unavailable — grant access to install the privileged helper".to_string()
-        })?;
+    let writer = writer_guard.as_deref().ok_or_else(|| {
+        "Fan control unavailable — grant access to install the privileged helper".to_string()
+    })?;
 
     // Only need fan metadata — skip expensive temperature/ioreg reads
     let mut service = SensorService::new();
@@ -337,6 +376,10 @@ pub fn apply_preset(state: State<'_, AppState>, name: String) -> Result<(), Stri
 
 #[tauri::command]
 pub fn save_preset(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    if !distribution_allows_fan_control() {
+        return Err("Fan presets are disabled in TestFlight builds.".to_string());
+    }
+
     let fan_control = state.fan_control.lock().map_err(|e| e.to_string())?;
     let configs = fan_control.configs().clone();
 
@@ -377,7 +420,9 @@ pub fn delete_preset(state: State<'_, AppState>, name: String) -> Result<(), Str
 #[tauri::command]
 pub fn set_tray_display_mode(mode: u8) -> Result<(), String> {
     if mode > 1 {
-        return Err(format!("Invalid tray display mode: {mode} — must be 0 (temperature) or 1 (fan RPM)"));
+        return Err(format!(
+            "Invalid tray display mode: {mode} — must be 0 (temperature) or 1 (fan RPM)"
+        ));
     }
     crate::tray::set_tray_display_mode(mode);
     Ok(())
@@ -396,6 +441,10 @@ pub fn diagnose_fan_control(state: State<'_, AppState>) -> Result<Vec<String>, S
 
     // System info
     let mut lines: Vec<String> = Vec::new();
+    lines.push(format!(
+        "Fan control enabled for this distribution: {}",
+        distribution_allows_fan_control()
+    ));
 
     // Check if running as root
     let uid = unsafe { libc::getuid() };
@@ -440,7 +489,9 @@ pub fn diagnose_fan_control(state: State<'_, AppState>) -> Result<Vec<String>, S
             lines.extend(diag);
         }
         None => {
-            lines.push("SMC Writer: NOT AVAILABLE (init failed — likely not running as root)".to_string());
+            lines.push(
+                "SMC Writer: NOT AVAILABLE (init failed — likely not running as root)".to_string(),
+            );
         }
     }
 
@@ -459,18 +510,34 @@ pub fn diagnose_fan_control(state: State<'_, AppState>) -> Result<Vec<String>, S
 #[derive(Serialize, Clone)]
 pub struct PrivilegeStatus {
     pub has_write_access: bool,
+    pub fan_control_available: bool,
+    pub reason: Option<String>,
 }
 
 #[tauri::command]
 pub fn get_privilege_status(state: State<'_, AppState>) -> Result<PrivilegeStatus, String> {
+    if !distribution_allows_fan_control() {
+        return Ok(PrivilegeStatus {
+            has_write_access: false,
+            fan_control_available: false,
+            reason: Some("Fan control is disabled in TestFlight builds.".to_string()),
+        });
+    }
+
     let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
     Ok(PrivilegeStatus {
         has_write_access: writer_guard.is_some(),
+        fan_control_available: true,
+        reason: None,
     })
 }
 
 #[tauri::command]
 pub fn request_privilege_restart(app_handle: tauri::AppHandle) -> Result<(), String> {
+    if !distribution_allows_fan_control() {
+        return Err("Admin restart is disabled in TestFlight builds.".to_string());
+    }
+
     let exe_path =
         std::env::current_exe().map_err(|e| format!("Failed to get executable path: {e}"))?;
 
@@ -496,7 +563,10 @@ pub fn request_privilege_restart(app_handle: tauri::AppHandle) -> Result<(), Str
     let inner_binary = app_bundle
         .join("Contents/MacOS")
         .join(exe_path.file_name().unwrap_or_default());
-    let shell_cmd = format!("'{}' &>/dev/null &", inner_binary.to_string_lossy());
+    let shell_cmd = format!(
+        "{} &>/dev/null &",
+        shell_quote(&inner_binary.to_string_lossy())
+    );
 
     let script = format!("do shell script \"{shell_cmd}\" with administrator privileges");
 
@@ -524,10 +594,11 @@ pub fn request_privilege_restart(app_handle: tauri::AppHandle) -> Result<(), Str
 
 #[tauri::command]
 pub fn open_url(url: String) -> Result<(), String> {
-    if !url.starts_with("https://") {
-        return Err("Only https:// URLs are supported".to_string());
+    const ALLOWED_URLS: [&str; 1] = ["https://github.com/naufaldi/mac-fan-ctrl"];
+    if !ALLOWED_URLS.contains(&url.as_str()) {
+        return Err("URL is not allowed".to_string());
     }
-    std::process::Command::new("open")
+    std::process::Command::new("/usr/bin/open")
         .arg(&url)
         .spawn()
         .map(|_| ())
@@ -577,7 +648,10 @@ pub fn set_alert_config(
 
 #[tauri::command]
 pub fn get_power_preset_config(state: State<'_, AppState>) -> Result<PowerPresetConfig, String> {
-    let config = state.power_preset_config.lock().map_err(|e| e.to_string())?;
+    let config = state
+        .power_preset_config
+        .lock()
+        .map_err(|e| e.to_string())?;
     Ok(config.clone())
 }
 
@@ -593,7 +667,10 @@ pub fn set_power_preset_config(
     state: State<'_, AppState>,
     params: SetPowerPresetConfigParams,
 ) -> Result<PowerPresetConfig, String> {
-    let mut config = state.power_preset_config.lock().map_err(|e| e.to_string())?;
+    let mut config = state
+        .power_preset_config
+        .lock()
+        .map_err(|e| e.to_string())?;
 
     if let Some(enabled) = params.enabled {
         config.enabled = enabled;
@@ -611,18 +688,24 @@ pub fn set_power_preset_config(
 
 #[tauri::command]
 pub fn get_current_power_source(state: State<'_, AppState>) -> Result<PowerSource, String> {
-    let source = state.current_power_source.lock().map_err(|e| e.to_string())?;
+    let source = state
+        .current_power_source
+        .lock()
+        .map_err(|e| e.to_string())?;
     Ok(*source)
 }
 
 // ── Helper installation commands ─────────────────────────────────────────────
 
 #[tauri::command]
-pub fn install_helper() -> Result<String, String> {
-    let exe_path = std::env::current_exe()
-        .map_err(|e| format!("Failed to get exe path: {e}"))?;
+pub fn install_helper(app_handle: AppHandle) -> Result<String, String> {
+    if !distribution_allows_fan_control() {
+        return Err("Privileged helper installation is disabled in TestFlight builds.".to_string());
+    }
 
-    let helper_binary = find_helper_binary(&exe_path)?;
+    let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get exe path: {e}"))?;
+
+    let helper_binary = helper_binary::find_helper_binary(&exe_path)?;
 
     let install_path = format!("{HELPER_INSTALL_DIR}/{DAEMON_LABEL}");
     let plist_path = format!("{LAUNCHDAEMON_DIR}/{DAEMON_LABEL}.plist");
@@ -675,6 +758,7 @@ pub fn install_helper() -> Result<String, String> {
     }
 
     wait_for_helper_ready()?;
+    reconnect_writer_internal(&app_handle)?;
     Ok("Helper installed and running".to_string())
 }
 
@@ -723,10 +807,15 @@ fn build_helper_install_shell_commands(
     plist_path: &str,
     plist_content: &str,
 ) -> String {
+    let helper_dir = shell_quote(HELPER_INSTALL_DIR);
+    let helper_binary = shell_quote(&helper_binary.to_string_lossy());
+    let install_path = shell_quote(install_path);
+    let plist_path = shell_quote(plist_path);
+
     format!(
-        "mkdir -p '{helper_dir}' && cp '{helper_binary}' '{install_path}' && chmod 755 '{install_path}' && chown root:wheel '{install_path}' && /bin/cat > '{plist_path}' << 'PLISTEOF'\n{plist_content}\nPLISTEOF\nchown root:wheel '{plist_path}' && chmod 644 '{plist_path}' && launchctl bootout system '{plist_path}' 2>/dev/null || true\nlaunchctl enable system/{label}\nlaunchctl bootstrap system '{plist_path}'\nlaunchctl kickstart -k system/{label}",
-        helper_dir = HELPER_INSTALL_DIR,
-        helper_binary = helper_binary.to_string_lossy(),
+        "mkdir -p {helper_dir} && cp {helper_binary} {install_path} && chmod 755 {install_path} && chown root:wheel {install_path} && /bin/cat > {plist_path} << 'PLISTEOF'\n{plist_content}\nPLISTEOF\nchown root:wheel {plist_path} && chmod 644 {plist_path} && launchctl bootout system {plist_path} 2>/dev/null || true\nlaunchctl enable system/{label}\nlaunchctl bootstrap system {plist_path}\nlaunchctl kickstart -k system/{label}",
+        helper_dir = helper_dir,
+        helper_binary = helper_binary,
         install_path = install_path,
         plist_path = plist_path,
         plist_content = plist_content,
@@ -734,35 +823,25 @@ fn build_helper_install_shell_commands(
     )
 }
 
-fn find_helper_binary(exe_path: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    // Production: look in the .app bundle
-    let app_bundle_helper = exe_path
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("MacOS/fanguard-helper"));
-
-    if let Some(ref path) = app_bundle_helper {
-        if path.exists() {
-            return Ok(path.clone());
-        }
-    }
-
-    // Dev mode: look in same directory as the binary (target/debug or target/release)
-    let target_dir = exe_path.parent().unwrap_or(exe_path);
-    let debug_helper = target_dir.join("fanguard-helper");
-    if debug_helper.exists() {
-        return Ok(debug_helper);
-    }
-
-    Err("Helper binary not found. Build it with: cargo build --bin fanguard-helper".to_string())
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
-#[tauri::command]
-pub fn reconnect_writer(state: State<'_, AppState>) -> Result<bool, String> {
+fn reconnect_writer_internal(app_handle: &AppHandle) -> Result<bool, String> {
+    let state = app_handle.state::<AppState>();
     let client = SmcSocketClient::new().map_err(|e| e.to_string())?;
     let mut writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
     *writer_guard = Some(Box::new(client));
     Ok(true)
+}
+
+#[tauri::command]
+pub fn reconnect_writer(app_handle: AppHandle) -> Result<bool, String> {
+    if !distribution_allows_fan_control() {
+        return Err("Fan control reconnection is disabled in TestFlight builds.".to_string());
+    }
+
+    reconnect_writer_internal(&app_handle)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -770,10 +849,53 @@ pub fn reconnect_writer(state: State<'_, AppState>) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_helper_install_shell_commands, ping_backend, should_try_direct_smc_writer,
+        apply_fan_control_write, build_helper_install_shell_commands,
+        distribution_allows_fan_control, ping_backend, should_try_direct_smc_writer,
         wait_for_helper_ready_with, DAEMON_LABEL, HELPER_INSTALL_DIR, LAUNCHDAEMON_DIR,
     };
+    use crate::alerts::AlertConfig;
+    use crate::fan_control::{FanControlConfig, FanControlState};
+    use crate::power_monitor::PowerSource;
+    use crate::power_presets::PowerPresetConfig;
+    use crate::presets::PresetStore;
+    use crate::smc::{FanData, FanMode};
+    use crate::smc_writer::mock::MockSmcWriter;
     use std::path::Path;
+    use std::sync::Mutex;
+
+    fn make_fan() -> FanData {
+        FanData {
+            index: 0,
+            label: "Fan 0".to_string(),
+            actual: 2000.0,
+            min: 1200.0,
+            max: 6550.0,
+            target: 1200.0,
+            mode: FanMode::Auto,
+        }
+    }
+
+    fn test_state() -> super::AppState {
+        super::AppState {
+            fan_control: Mutex::new(FanControlState::new()),
+            smc_writer: Mutex::new(Some(Box::new(MockSmcWriter::new()))),
+            preset_store: Mutex::new(PresetStore {
+                active_preset: Some("Automatic".to_string()),
+                custom_presets: vec![],
+            }),
+            alert_config: Mutex::new(AlertConfig {
+                enabled: false,
+                cpu_threshold: 90.0,
+                cooldown_secs: 60,
+            }),
+            power_preset_config: Mutex::new(PowerPresetConfig {
+                enabled: false,
+                ac_preset: None,
+                battery_preset: None,
+            }),
+            current_power_source: Mutex::new(PowerSource::Unknown),
+        }
+    }
 
     #[test]
     fn ping_backend_returns_expected_payload() {
@@ -816,6 +938,23 @@ mod tests {
     }
 
     #[test]
+    fn helper_install_commands_escape_single_quotes_in_paths() {
+        let helper_binary = Path::new("/tmp/fan'guard-helper");
+        let install_path = "/Library/PrivilegedHelperTools/io.github.naufaldi.fanguard.helper";
+        let plist_path = "/Library/LaunchDaemons/io.github.naufaldi.fanguard.helper.plist";
+
+        let commands = build_helper_install_shell_commands(
+            helper_binary,
+            install_path,
+            plist_path,
+            "<plist />",
+        );
+
+        assert!(commands.contains("'/tmp/fan'\"'\"'guard-helper'"));
+        assert!(!commands.contains("cp '/tmp/fan'guard-helper'"));
+    }
+
+    #[test]
     fn helper_ready_wait_requires_successful_socket_ping() {
         let mut attempts = 0u8;
         let result = wait_for_helper_ready_with(
@@ -841,5 +980,38 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Permission denied"));
+    }
+
+    #[test]
+    fn fan_control_write_helper_releases_locks_before_snapshot_refresh() {
+        let state = test_state();
+        let fans = vec![make_fan()];
+
+        apply_fan_control_write(&state, |control, writer| {
+            control
+                .set_config(
+                    0,
+                    FanControlConfig::ConstantRpm { target_rpm: 4000.0 },
+                    &fans,
+                    writer,
+                )
+                .map_err(|e| e.to_string())
+        })
+        .expect("fan control write should succeed");
+
+        assert!(state.smc_writer.try_lock().is_ok());
+        assert!(state.fan_control.try_lock().is_ok());
+    }
+
+    #[cfg(not(feature = "app-store"))]
+    #[test]
+    fn direct_distribution_allows_fan_control_by_default() {
+        assert!(distribution_allows_fan_control());
+    }
+
+    #[cfg(feature = "app-store")]
+    #[test]
+    fn app_store_distribution_disables_fan_control() {
+        assert!(!distribution_allows_fan_control());
     }
 }

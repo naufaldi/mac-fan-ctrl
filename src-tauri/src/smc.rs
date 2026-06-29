@@ -778,9 +778,7 @@ fn label_fan(model_id: Option<&str>, index: usize, total_fans: usize) -> String 
         return "System Fan".to_string();
     }
 
-    let is_mac_pro = model_id
-        .map(|m| m.starts_with("MacPro"))
-        .unwrap_or(false);
+    let is_mac_pro = model_id.map(|m| m.starts_with("MacPro")).unwrap_or(false);
 
     if is_mac_pro {
         return match index {
@@ -1425,11 +1423,26 @@ mod tests {
 
     #[test]
     fn lookup_well_known_intel_sensor_keys() {
-        assert_eq!(lookup_well_known_sensor_key("TC0P"), Some(("CPU Proximity", "Cpu")));
-        assert_eq!(lookup_well_known_sensor_key("TG0D"), Some(("GPU Die", "Gpu")));
-        assert_eq!(lookup_well_known_sensor_key("TH0P"), Some(("HDD Proximity", "Storage")));
-        assert_eq!(lookup_well_known_sensor_key("TA0P"), Some(("Ambient", "Other")));
-        assert_eq!(lookup_well_known_sensor_key("TB0T"), Some(("Battery TS 0", "Battery")));
+        assert_eq!(
+            lookup_well_known_sensor_key("TC0P"),
+            Some(("CPU Proximity", "Cpu"))
+        );
+        assert_eq!(
+            lookup_well_known_sensor_key("TG0D"),
+            Some(("GPU Die", "Gpu"))
+        );
+        assert_eq!(
+            lookup_well_known_sensor_key("TH0P"),
+            Some(("HDD Proximity", "Storage"))
+        );
+        assert_eq!(
+            lookup_well_known_sensor_key("TA0P"),
+            Some(("Ambient", "Other"))
+        );
+        assert_eq!(
+            lookup_well_known_sensor_key("TB0T"),
+            Some(("Battery TS 0", "Battery"))
+        );
         assert_eq!(lookup_well_known_sensor_key("ZZZZ"), None);
     }
 

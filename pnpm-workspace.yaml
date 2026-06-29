@@ -17,6 +17,7 @@ catalog:
 onlyBuiltDependencies:
   - '@biomejs/biome'
   - '@tauri-apps/cli'
+  - 'esbuild'
 
 # Hoist settings for Tauri compatibility
 hoistPattern:
@@ -24,3 +25,6 @@ hoistPattern:
 
 # Strict peer dependencies
 strictPeerDependencies: true
+
+allowBuilds:
+  esbuild: true

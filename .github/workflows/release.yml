@@ -35,8 +35,8 @@ jobs:
       - name: Build helper binary (universal)
         run: |
           cd src-tauri
-          cargo build --release --bin fanguard-helper --target aarch64-apple-darwin
-          cargo build --release --bin fanguard-helper --target x86_64-apple-darwin
+          cargo build --release --features helper-binary --bin fanguard-helper --target aarch64-apple-darwin
+          cargo build --release --features helper-binary --bin fanguard-helper --target x86_64-apple-darwin
           mkdir -p target/universal-apple-darwin/release
           lipo -create \
             target/aarch64-apple-darwin/release/fanguard-helper \
@@ -45,9 +45,13 @@ jobs:
 
       - name: Stage helper for Tauri bundle
         run: |
-          cp src-tauri/target/universal-apple-darwin/release/fanguard-helper \
-            src-tauri/fanguard-helper-universal-apple-darwin
+          HELPER=src-tauri/target/universal-apple-darwin/release/fanguard-helper
+          cp "$HELPER" src-tauri/fanguard-helper-universal-apple-darwin
+          cp "$HELPER" src-tauri/fanguard-helper-aarch64-apple-darwin
+          cp "$HELPER" src-tauri/fanguard-helper-x86_64-apple-darwin
           chmod 755 src-tauri/fanguard-helper-universal-apple-darwin
+          chmod 755 src-tauri/fanguard-helper-aarch64-apple-darwin
+          chmod 755 src-tauri/fanguard-helper-x86_64-apple-darwin
 
       - name: Strip quarantine attribute from helper binary
         run: xattr -cr src-tauri/fanguard-helper-universal-apple-darwin 2>/dev/null || true
@@ -106,4 +110,4 @@ jobs:
           releaseBody: "See the assets to download and install this version."
           releaseDraft: true
           prerelease: true
-          args: --target universal-apple-darwin
+          args: --target universal-apple-darwin --features helper-binary --config src-tauri/tauri.direct.conf.json

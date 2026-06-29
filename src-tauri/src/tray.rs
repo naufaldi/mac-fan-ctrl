@@ -57,11 +57,10 @@ fn mark_menu_closed() {
 }
 
 use crate::commands::{AppState, TrayHandle};
-use crate::fan_control::FanControlConfig;
 use crate::log::{debug_log, warn_log};
 use crate::power_monitor::PowerSource;
 use crate::presets;
-use crate::smc::{FanData, FanMode, SensorData, SensorService};
+use crate::smc::{FanData, FanMode, SensorData};
 
 // ── Menu item ID constants ──────────────────────────────────────────────────
 
@@ -72,6 +71,128 @@ const QUIT: &str = "quit";
 const PRESET_PREFIX: &str = "preset::";
 const FAN_AUTO_PREFIX: &str = "fan_auto::";
 const FAN_RPM_PREFIX: &str = "fan_rpm::";
+const RPM_TOLERANCE: u32 = 50;
+const RPM_RATIOS: [f32; 4] = [0.25, 0.50, 0.75, 1.00];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FanModeMenuAction {
+    Auto,
+    Rpm(u32),
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FanModeMenuRow {
+    pub id_suffix: String,
+    pub label: String,
+    pub selected: bool,
+    pub enabled: bool,
+    pub action: FanModeMenuAction,
+}
+
+fn selected_menu_label(selected: bool, text: &str) -> String {
+    if selected {
+        format!("✓ {text}")
+    } else {
+        text.to_string()
+    }
+}
+
+/// Builds mutually exclusive fan mode rows for tray submenu rendering.
+#[cfg(test)]
+pub fn fan_mode_menu_rows(fan: &FanData) -> Vec<FanModeMenuRow> {
+    fan_mode_menu_rows_for_availability(fan, true)
+}
+
+/// Builds fan mode rows with write controls removed for monitoring-only builds.
+pub fn fan_mode_menu_rows_for_availability(
+    fan: &FanData,
+    fan_control_available: bool,
+) -> Vec<FanModeMenuRow> {
+    if !fan_control_available {
+        return vec![FanModeMenuRow {
+            id_suffix: "monitoring".to_string(),
+            label: "Monitoring only".to_string(),
+            selected: false,
+            enabled: false,
+            action: FanModeMenuAction::Unavailable,
+        }];
+    }
+
+    let preset_rows: Vec<(u32, String)> = RPM_RATIOS
+        .iter()
+        .map(|ratio| {
+            let rpm = (fan.max * ratio) as u32;
+            (rpm, format!("{rpm} RPM"))
+        })
+        .collect();
+
+    match fan.mode {
+        FanMode::Auto => {
+            let mut rows = vec![FanModeMenuRow {
+                id_suffix: "auto".to_string(),
+                label: selected_menu_label(true, "Auto"),
+                selected: true,
+                enabled: true,
+                action: FanModeMenuAction::Auto,
+            }];
+            rows.extend(preset_rows.into_iter().map(|(rpm, label)| FanModeMenuRow {
+                id_suffix: rpm.to_string(),
+                label: selected_menu_label(false, &label),
+                selected: false,
+                enabled: true,
+                action: FanModeMenuAction::Rpm(rpm),
+            }));
+            rows
+        }
+        FanMode::Forced => {
+            let target = fan.target as u32;
+            let matched_rpm = preset_rows
+                .iter()
+                .find(|(rpm, _)| rpm.abs_diff(target) < RPM_TOLERANCE)
+                .map(|(rpm, _)| *rpm);
+
+            let mut rows = vec![FanModeMenuRow {
+                id_suffix: "auto".to_string(),
+                label: selected_menu_label(false, "Auto"),
+                selected: false,
+                enabled: true,
+                action: FanModeMenuAction::Auto,
+            }];
+
+            rows.extend(preset_rows.into_iter().map(|(rpm, label)| {
+                let selected = matched_rpm == Some(rpm);
+                FanModeMenuRow {
+                    id_suffix: rpm.to_string(),
+                    label: selected_menu_label(selected, &label),
+                    selected,
+                    enabled: true,
+                    action: FanModeMenuAction::Rpm(rpm),
+                }
+            }));
+
+            if matched_rpm.is_none() {
+                rows.push(FanModeMenuRow {
+                    id_suffix: "custom".to_string(),
+                    label: selected_menu_label(true, &format!("Custom ({target} RPM)")),
+                    selected: true,
+                    enabled: true,
+                    action: FanModeMenuAction::Rpm(target),
+                });
+            }
+
+            rows
+        }
+    }
+}
+
+fn fan_mode_row_id(fan_index: u8, row: &FanModeMenuRow) -> String {
+    match &row.action {
+        FanModeMenuAction::Auto => format!("{FAN_AUTO_PREFIX}{fan_index}"),
+        FanModeMenuAction::Rpm(rpm) => format!("{FAN_RPM_PREFIX}{fan_index}::{rpm}"),
+        FanModeMenuAction::Unavailable => format!("fan_unavailable::{fan_index}"),
+    }
+}
 
 // ── Setup ───────────────────────────────────────────────────────────────────
 
@@ -97,18 +218,28 @@ fn build_initial_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error>
     let show_item = MenuItem::with_id(app, SHOW_WINDOW, "Show FanGuard", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let about_item = MenuItem::with_id(app, ABOUT, "About FanGuard", true, None::<&str>)?;
-    let update_item = MenuItem::with_id(app, CHECK_FOR_UPDATES, "Check for Updates...", true, None::<&str>)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, QUIT, "Quit FanGuard", true, None::<&str>)?;
 
-    MenuBuilder::new(app)
+    let builder = MenuBuilder::new(app)
         .item(&show_item)
         .item(&sep1)
-        .item(&about_item)
-        .item(&update_item)
-        .item(&sep2)
-        .item(&quit_item)
-        .build()
+        .item(&about_item);
+
+    let builder = if crate::commands::distribution_allows_fan_control() {
+        let update_item = MenuItem::with_id(
+            app,
+            CHECK_FOR_UPDATES,
+            "Check for Updates...",
+            true,
+            None::<&str>,
+        )?;
+        builder.item(&update_item)
+    } else {
+        builder
+    };
+
+    builder.item(&sep2).item(&quit_item).build()
 }
 
 // ── Menu construction ───────────────────────────────────────────────────────
@@ -120,6 +251,7 @@ fn build_tray_menu(
     all_presets: &[presets::Preset],
     power_source: PowerSource,
 ) -> Result<Menu<tauri::Wry>, tauri::Error> {
+    let fan_control_available = crate::commands::distribution_allows_fan_control();
     let show_item = MenuItem::with_id(app, SHOW_WINDOW, "Show FanGuard", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
 
@@ -132,31 +264,19 @@ fn build_tray_menu(
     let power_item = MenuItem::with_id(app, "power_source", power_label, false, None::<&str>)?;
 
     // Available fans section
-    let fans_header = MenuItem::with_id(app, "fans_header", "Available fans:", false, None::<&str>)?;
+    let fans_header =
+        MenuItem::with_id(app, "fans_header", "Available fans:", false, None::<&str>)?;
 
     let fan_submenus: Vec<tauri::menu::Submenu<tauri::Wry>> = fans
         .iter()
-        .filter_map(|fan| build_fan_submenu(app, fan).ok())
+        .filter_map(|fan| build_fan_submenu(app, fan, fan_control_available).ok())
         .collect();
 
     let sep2 = PredefinedMenuItem::separator(app)?;
 
     // Presets section
-    let presets_header =
-        MenuItem::with_id(app, "presets_header", "Fan presets:", false, None::<&str>)?;
-
-    let preset_items: Vec<CheckMenuItem<tauri::Wry>> = all_presets
-        .iter()
-        .filter_map(|p| {
-            let id = format!("{PRESET_PREFIX}{}", p.name);
-            let checked = active_preset == Some(p.name.as_str());
-            CheckMenuItem::with_id(app, &id, &p.name, true, checked, None::<&str>).ok()
-        })
-        .collect();
-
     let sep3 = PredefinedMenuItem::separator(app)?;
     let about_item = MenuItem::with_id(app, ABOUT, "About FanGuard", true, None::<&str>)?;
-    let update_item = MenuItem::with_id(app, CHECK_FOR_UPDATES, "Check for Updates...", true, None::<&str>)?;
     let sep4 = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, QUIT, "Quit FanGuard", true, None::<&str>)?;
 
@@ -171,24 +291,48 @@ fn build_tray_menu(
         builder = builder.item(submenu);
     }
 
-    builder = builder.item(&sep2).item(&presets_header);
+    if fan_control_available {
+        let presets_header =
+            MenuItem::with_id(app, "presets_header", "Fan presets:", false, None::<&str>)?;
 
-    for preset_item in &preset_items {
-        builder = builder.item(preset_item);
+        let preset_items: Vec<CheckMenuItem<tauri::Wry>> = all_presets
+            .iter()
+            .filter_map(|p| {
+                let id = format!("{PRESET_PREFIX}{}", p.name);
+                let checked = active_preset == Some(p.name.as_str());
+                CheckMenuItem::with_id(app, &id, &p.name, true, checked, None::<&str>).ok()
+            })
+            .collect();
+
+        builder = builder.item(&sep2).item(&presets_header);
+
+        for preset_item in &preset_items {
+            builder = builder.item(preset_item);
+        }
     }
 
-    builder
-        .item(&sep3)
-        .item(&about_item)
-        .item(&update_item)
-        .item(&sep4)
-        .item(&quit_item)
-        .build()
+    let builder = builder.item(&sep3).item(&about_item);
+
+    let builder = if fan_control_available {
+        let update_item = MenuItem::with_id(
+            app,
+            CHECK_FOR_UPDATES,
+            "Check for Updates...",
+            true,
+            None::<&str>,
+        )?;
+        builder.item(&update_item)
+    } else {
+        builder
+    };
+
+    builder.item(&sep4).item(&quit_item).build()
 }
 
 fn build_fan_submenu(
     app: &AppHandle,
     fan: &FanData,
+    fan_control_available: bool,
 ) -> Result<tauri::menu::Submenu<tauri::Wry>, tauri::Error> {
     let mode_label = match fan.mode {
         FanMode::Auto => "Auto".to_string(),
@@ -196,28 +340,18 @@ fn build_fan_submenu(
     };
     let title = format!("{} – {mode_label}", fan.label);
 
-    let auto_id = format!("{FAN_AUTO_PREFIX}{}", fan.index);
-    let is_auto = matches!(fan.mode, FanMode::Auto);
-    let auto_item = CheckMenuItem::with_id(app, &auto_id, "Auto", true, is_auto, None::<&str>)?;
+    let rows = fan_mode_menu_rows_for_availability(fan, fan_control_available);
+    let mut sub = SubmenuBuilder::new(app, &title);
 
-    // RPM steps: 25%, 50%, 75%, 100% of max
-    let rpm_ratios = [0.25_f32, 0.50, 0.75, 1.00];
-    let rpm_items: Vec<CheckMenuItem<tauri::Wry>> = rpm_ratios
-        .iter()
-        .filter_map(|ratio| {
-            let rpm = (fan.max * ratio) as u32;
-            let id = format!("{FAN_RPM_PREFIX}{}::{rpm}", fan.index);
-            let label = format!("{rpm} RPM");
-            let checked =
-                matches!(fan.mode, FanMode::Forced) && (fan.target as u32).abs_diff(rpm) < 50;
-            CheckMenuItem::with_id(app, &id, &label, true, checked, None::<&str>).ok()
-        })
-        .collect();
-
-    let mut sub = SubmenuBuilder::new(app, &title).item(&auto_item);
-
-    for rpm_item in &rpm_items {
-        sub = sub.item(rpm_item);
+    for row in &rows {
+        let item = MenuItem::with_id(
+            app,
+            fan_mode_row_id(fan.index, row),
+            &row.label,
+            row.enabled,
+            None::<&str>,
+        )?;
+        sub = sub.item(&item);
     }
 
     sub.build()
@@ -265,8 +399,15 @@ pub fn update_tray_title(app_handle: &AppHandle, sensor_data: &SensorData) {
 }
 
 pub fn update_tray_menu(app_handle: &AppHandle, sensor_data: &SensorData) {
-    // Skip menu rebuild while the dropdown is likely open to avoid dismissing it
-    if is_menu_guarded() {
+    rebuild_tray_menu(app_handle, sensor_data, false);
+}
+
+pub fn update_tray_menu_force(app_handle: &AppHandle, sensor_data: &SensorData) {
+    rebuild_tray_menu(app_handle, sensor_data, true);
+}
+
+fn rebuild_tray_menu(app_handle: &AppHandle, sensor_data: &SensorData, force: bool) {
+    if !force && is_menu_guarded() {
         return;
     }
 
@@ -308,7 +449,7 @@ pub fn update_tray_menu(app_handle: &AppHandle, sensor_data: &SensorData) {
     ) {
         Ok(menu) => {
             debug_log!(
-                "[tray] set_menu fans={} presets={}",
+                "[tray] set_menu fans={} presets={} force={force}",
                 sensor_data.fans.len(),
                 all_presets.len()
             );
@@ -335,20 +476,32 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             let _ = app.emit("show-about", ());
         }
         CHECK_FOR_UPDATES => {
+            if !crate::commands::distribution_allows_fan_control() {
+                return;
+            }
             show_main_window(app);
             let _ = app.emit("check-for-updates", ());
         }
         QUIT => quit_app(app),
         _ if id.starts_with(PRESET_PREFIX) => {
+            if !crate::commands::distribution_allows_fan_control() {
+                return;
+            }
             let preset_name = &id[PRESET_PREFIX.len()..];
             apply_preset_from_tray(app, preset_name);
         }
         _ if id.starts_with(FAN_AUTO_PREFIX) => {
+            if !crate::commands::distribution_allows_fan_control() {
+                return;
+            }
             if let Ok(fan_index) = id[FAN_AUTO_PREFIX.len()..].parse::<u8>() {
                 set_fan_auto_from_tray(app, fan_index);
             }
         }
         _ if id.starts_with(FAN_RPM_PREFIX) => {
+            if !crate::commands::distribution_allows_fan_control() {
+                return;
+            }
             let rest = &id[FAN_RPM_PREFIX.len()..];
             if let Some((idx_str, rpm_str)) = rest.split_once("::") {
                 if let (Ok(fan_index), Ok(rpm)) = (idx_str.parse::<u8>(), rpm_str.parse::<f32>()) {
@@ -415,46 +568,68 @@ fn apply_preset_from_tray(app: &AppHandle, preset_name: &str) {
 }
 
 fn set_fan_auto_from_tray(app: &AppHandle, fan_index: u8) {
-    let app = app.clone();
-
-    std::thread::spawn(move || {
-        let state = app.state::<AppState>();
-        let writer_guard = match state.smc_writer.lock() {
-            Ok(g) => g,
-            Err(_) => return,
-        };
-        let Some(writer) = writer_guard.as_deref() else {
-            return;
-        };
-        let mut control = match state.fan_control.lock() {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        let _ = control.set_auto(fan_index, writer);
-    });
+    if let Err(error) = crate::commands::apply_set_fan_auto(app, fan_index) {
+        warn_log!("[fanguard] Tray set fan auto failed: {error}");
+    }
 }
 
 fn set_fan_rpm_from_tray(app: &AppHandle, fan_index: u8, rpm: f32) {
-    let app = app.clone();
+    if let Err(error) = crate::commands::apply_set_fan_constant_rpm(app, fan_index, rpm) {
+        warn_log!("[fanguard] Tray set fan RPM failed: {error}");
+    }
+}
 
-    std::thread::spawn(move || {
-        let state = app.state::<AppState>();
-        let writer_guard = match state.smc_writer.lock() {
-            Ok(g) => g,
-            Err(_) => return,
-        };
-        let Some(writer) = writer_guard.as_deref() else {
-            return;
-        };
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        let mut service = SensorService::new();
-        let fans = service.read_fans_only().unwrap_or_default();
+    fn make_fan(mode: FanMode, target: f32, max: f32) -> FanData {
+        FanData {
+            index: 0,
+            label: "Fan 0".to_string(),
+            actual: 2000.0,
+            min: 1200.0,
+            max,
+            target,
+            mode,
+        }
+    }
 
-        let config = FanControlConfig::ConstantRpm { target_rpm: rpm };
-        let mut control = match state.fan_control.lock() {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        let _ = control.set_config(fan_index, config, &fans, writer);
-    });
+    #[test]
+    fn fan_mode_menu_rows_auto_selects_only_auto() {
+        let rows = fan_mode_menu_rows(&make_fan(FanMode::Auto, 1200.0, 6550.0));
+        let selected: Vec<_> = rows.iter().filter(|row| row.selected).collect();
+        assert_eq!(selected.len(), 1);
+        assert!(matches!(selected[0].action, FanModeMenuAction::Auto));
+    }
+
+    #[test]
+    fn fan_mode_menu_rows_forced_near_step_selects_one_rpm() {
+        let max = 6550.0;
+        let rpm = (max * 0.50) as u32;
+        let rows = fan_mode_menu_rows(&make_fan(FanMode::Forced, rpm as f32, max));
+        let selected: Vec<_> = rows.iter().filter(|row| row.selected).collect();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].action, FanModeMenuAction::Rpm(rpm));
+    }
+
+    #[test]
+    fn fan_mode_menu_rows_forced_custom_selects_custom_label() {
+        let rows = fan_mode_menu_rows(&make_fan(FanMode::Forced, 4000.0, 6550.0));
+        let selected: Vec<_> = rows.iter().filter(|row| row.selected).collect();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].action, FanModeMenuAction::Rpm(4000));
+        assert!(selected[0].label.contains("Custom"));
+    }
+
+    #[test]
+    fn fan_mode_menu_rows_monitoring_only_do_not_expose_write_actions() {
+        let rows =
+            fan_mode_menu_rows_for_availability(&make_fan(FanMode::Auto, 1200.0, 6550.0), false);
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].label, "Monitoring only");
+        assert!(!rows[0].enabled);
+        assert_eq!(rows[0].action, FanModeMenuAction::Unavailable);
+    }
 }

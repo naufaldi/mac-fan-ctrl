@@ -265,12 +265,7 @@ mod tests {
         maxes.insert(0, 5800.0);
 
         let mut configs = HashMap::new();
-        configs.insert(
-            0,
-            FanControlConfig::ConstantRpm {
-                target_rpm: 5800.0,
-            },
-        );
+        configs.insert(0, FanControlConfig::ConstantRpm { target_rpm: 5800.0 });
         let result = find_preset_with_matching_configs(&store, &configs, &indices, &maxes);
         assert_eq!(result, Some("Full Blast".to_string()));
     }
@@ -283,12 +278,7 @@ mod tests {
         maxes.insert(0, 5800.0);
 
         let mut configs = HashMap::new();
-        configs.insert(
-            0,
-            FanControlConfig::ConstantRpm {
-                target_rpm: 3000.0,
-            },
-        );
+        configs.insert(0, FanControlConfig::ConstantRpm { target_rpm: 3000.0 });
         let result = find_preset_with_matching_configs(&store, &configs, &indices, &maxes);
         assert_eq!(result, None);
     }
