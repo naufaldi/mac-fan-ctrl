@@ -346,7 +346,7 @@ fn build_fan_submenu(
     for row in &rows {
         let item = MenuItem::with_id(
             app,
-            &fan_mode_row_id(fan.index, row),
+            fan_mode_row_id(fan.index, row),
             &row.label,
             row.enabled,
             None::<&str>,

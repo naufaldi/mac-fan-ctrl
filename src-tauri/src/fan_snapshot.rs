@@ -20,11 +20,12 @@ pub fn sync_active_preset(state: &AppState, fan_indices: &[u8]) -> Result<(), St
         .configs()
         .clone();
 
-    let all_auto = fan_indices.iter().all(|index| {
-        configs
-            .get(index)
-            .is_none_or(|config| matches!(config, FanControlConfig::Auto))
-    });
+    let all_auto = fan_indices
+        .iter()
+        .all(|index| match configs.get(index) {
+            Some(config) => matches!(config, FanControlConfig::Auto),
+            None => true,
+        });
 
     let mut store = state.preset_store.lock().map_err(|e| e.to_string())?;
     store.active_preset = if all_auto {
