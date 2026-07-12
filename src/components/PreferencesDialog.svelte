@@ -12,11 +12,12 @@ import PowerPresetSettings from "./PowerPresetSettings.svelte";
 
 interface Props {
 	trayDisplayMode: number;
+	fanControlAvailable: boolean;
 	onTrayModeChange: (mode: number) => void;
 	onclose: () => void;
 }
 
-const { trayDisplayMode, onTrayModeChange, onclose }: Props = $props();
+const { trayDisplayMode, fanControlAvailable, onTrayModeChange, onclose }: Props = $props();
 
 let dialogEl: HTMLDivElement | undefined = $state(undefined);
 let closeButtonEl: HTMLButtonElement | undefined = $state(undefined);
@@ -102,7 +103,11 @@ function handleKeydown(event: KeyboardEvent): void {
 
       <div class={cn("border-t border-(--border-subtle)")}></div>
 
-      <PowerPresetSettings />
+      {#if fanControlAvailable}
+        <PowerPresetSettings />
+      {:else}
+        <p class={cn("text-[12px] text-(--text-secondary)")}>Fan preset automation is unavailable in TestFlight builds.</p>
+      {/if}
     </div>
 
     <div class={cn("flex justify-end px-6 pb-5 pt-2")}>

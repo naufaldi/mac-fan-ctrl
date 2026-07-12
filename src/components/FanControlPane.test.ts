@@ -1,14 +1,18 @@
 import { render, screen } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { FanData, Sensor, SensorData } from "$lib/types";
+import type { FanData } from "$lib/types";
 import FanControlPane from "./FanControlPane.svelte";
 
+const { setAllFansConstantRpm, restoreAllFansAuto } = vi.hoisted(() => ({
+	setAllFansConstantRpm: vi.fn().mockResolvedValue(undefined),
+	restoreAllFansAuto: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("$lib/tauriCommands", () => ({
-	getFanControlConfigs: vi.fn().mockResolvedValue({}),
-	setFanAuto: vi.fn().mockResolvedValue(undefined),
-	setFanConstantRpm: vi.fn().mockResolvedValue(undefined),
 	requestPrivilegeRestart: vi.fn(),
+	restoreAllFansAuto,
+	setAllFansConstantRpm,
 }));
 
 const autoFan: FanData = {
@@ -17,109 +21,52 @@ const autoFan: FanData = {
 	actual: 2000,
 	min: 1200,
 	max: 6550,
-	target: 1200,
+	target: 2000,
 	mode: "auto",
 };
 
-const forcedFan: FanData = {
-	...autoFan,
-	mode: "forced",
-	target: 4000,
-};
-
-const sensors: Sensor[] = [
-	{
-		key: "TC0D",
-		name: "CPU Die",
-		value: 55,
-		unit: "C",
-		sensor_type: "Cpu",
-	},
-];
-
-const toDesignToken = (fan: FanData) => ({
-	id: `fan-${fan.index}`,
-	fanIndex: fan.index,
-	label: fan.label,
-	value: Math.round(fan.actual),
-	unit: "rpm" as const,
-	status: "normal" as const,
-	minRpm: Math.round(fan.min),
-	maxRpm: Math.round(fan.max),
-	targetRpm: Math.round(fan.target),
-	controlMode: fan.mode === "forced" ? ("constant" as const) : ("auto" as const),
-});
+const renderPane = (hasWriteAccess = true) =>
+	render(FanControlPane, {
+		props: { rawFans: [autoFan], hasWriteAccess },
+	});
 
 describe("FanControlPane", () => {
-	it("shows Auto active when fan mode is auto", () => {
-		render(FanControlPane, {
-			props: {
-				fans: [toDesignToken(autoFan)],
-				rawFans: [autoFan],
-				sensors,
-				hasWriteAccess: true,
-				fanControlAvailable: true,
-			},
-		});
+	it("shows the shared numeric RPM range and disables Apply in Auto mode", () => {
+		renderPane();
 
-		expect(screen.getByRole("button", { name: "Set Fan 0 to auto mode" })).toHaveClass(
-			"text-(--control-active-text)",
-		);
-		expect(screen.getByRole("button", { name: "Set Fan 0 to custom mode" })).not.toHaveClass(
-			"text-(--control-active-text)",
-		);
+		expect(screen.getByText("1200")).toBeVisible();
+		expect(screen.getByText("6550")).toBeVisible();
+		expect(screen.getByText("2000 RPM")).toBeVisible();
+		expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
 	});
 
-	it("shows Custom active when fan mode is forced", () => {
-		render(FanControlPane, {
-			props: {
-				fans: [toDesignToken(forcedFan)],
-				rawFans: [forcedFan],
-				sensors,
-				hasWriteAccess: true,
-				fanControlAvailable: true,
-			},
-		});
-
-		const customButton = screen.getByRole("button", { name: "Set Fan 0 to custom mode" });
-		expect(customButton).toHaveClass("text-(--control-active-text)");
-		expect(customButton).toHaveTextContent("Constant value of 4000");
-		expect(screen.getByRole("button", { name: "Set Fan 0 to auto mode" })).not.toHaveClass(
-			"text-(--control-active-text)",
-		);
-	});
-
-	it("calls setFanAuto when Auto is clicked", async () => {
+	it("applies one manual target through the global backend command", async () => {
 		const user = userEvent.setup();
-		const { setFanAuto } = await import("$lib/tauriCommands");
+		renderPane();
 
-		render(FanControlPane, {
-			props: {
-				fans: [toDesignToken(forcedFan)],
-				rawFans: [forcedFan],
-				sensors,
-				hasWriteAccess: true,
-				fanControlAvailable: true,
-			},
-		});
+		await user.click(screen.getByRole("button", { name: "Manual" }));
+		await user.click(screen.getByRole("button", { name: "Apply" }));
 
-		await user.click(screen.getByRole("button", { name: "Set Fan 0 to auto mode" }));
-		expect(setFanAuto).toHaveBeenCalledWith(0);
+		expect(setAllFansConstantRpm).toHaveBeenCalledWith(2000);
+		expect(screen.getByText("Applied 2000 RPM to 1 fan.")).toBeVisible();
 	});
 
-	it("hides write controls when fan control is unavailable", () => {
-		render(FanControlPane, {
-			props: {
-				fans: [toDesignToken(autoFan)],
-				rawFans: [autoFan],
-				sensors,
-				hasWriteAccess: false,
-				fanControlAvailable: false,
-			},
-		});
+	it("restores all fans to automatic control", async () => {
+		const user = userEvent.setup();
+		renderPane();
 
-		expect(screen.queryByRole("button", { name: "Set Fan 0 to auto mode" })).not.toBeInTheDocument();
-		expect(screen.queryByRole("button", { name: "Set Fan 0 to custom mode" })).not.toBeInTheDocument();
-		expect(screen.getByText("Monitoring only")).toBeVisible();
+		await user.click(screen.getByRole("button", { name: "Restore Auto" }));
+
+		expect(restoreAllFansAuto).toHaveBeenCalledTimes(1);
+		expect(screen.getByText("Restored automatic control for 1 fan.")).toBeVisible();
+	});
+
+	it("disables fan writes without administrator access", () => {
+		renderPane(false);
+
+		expect(screen.getByRole("slider", { name: "Target RPM" })).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Restore Auto" })).toBeDisabled();
+		expect(screen.getByText("Fan writes need administrator access.")).toBeVisible();
 	});
 });

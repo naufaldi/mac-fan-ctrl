@@ -84,6 +84,10 @@ function handleKeydown(event: KeyboardEvent): void {
         <p class={cn("text-[12px] text-(--text-secondary)")}>
           You're running the latest version.
         </p>
+      {:else if result?.status === "managed-by-app-store"}
+        <p class={cn("text-[12px] text-(--text-secondary)")}>
+          Updates are managed by the App Store.
+        </p>
       {:else if result?.status === "available"}
         <p class={cn("text-[12px] text-(--text-primary)")}>
           Version {result.version} is available.

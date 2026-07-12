@@ -73,13 +73,18 @@ async function handleBatteryPreset(event: Event): Promise<void> {
 	}
 }
 
-const powerSourceLabel = $derived(
-	powerSource === "ac"
-		? "AC Power"
-		: powerSource === "battery"
-			? "Battery"
-			: "Unknown",
-);
+function formatPowerSource(source: PowerSource): string {
+	switch (source) {
+		case "ac":
+			return "AC Power";
+		case "battery":
+			return "Battery";
+		case "unknown":
+			return "Unknown";
+	}
+}
+
+const powerSourceLabel = $derived(formatPowerSource(powerSource));
 </script>
 
 <div class={cn("flex flex-col gap-3")}>

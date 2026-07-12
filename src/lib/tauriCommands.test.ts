@@ -63,7 +63,7 @@ describe("tauriCommands", () => {
 		let forwardedPayload: SensorData | null = null;
 		const unlisten = vi.fn();
 		mockedListen.mockImplementation(async (_event, callback) => {
-			callback({ payload: sampleSensors } as { payload: SensorData });
+			callback({ event: SENSOR_UPDATE_EVENT, id: 1, payload: sampleSensors });
 			return unlisten;
 		});
 

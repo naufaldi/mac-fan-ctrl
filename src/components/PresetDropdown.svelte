@@ -98,7 +98,7 @@ async function handleSavePreset(): Promise<void> {
 
 async function handleDeletePreset(
 	name: string,
-	event: MouseEvent,
+	event: Event,
 ): Promise<void> {
 	event.stopPropagation();
 	applyError = "";

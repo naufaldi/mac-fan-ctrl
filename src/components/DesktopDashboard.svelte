@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { CheckCircle2, MoreHorizontal, Search } from "lucide-svelte";
 import { cn } from "$lib/cn";
 import type { SensorData as DesignTokenSensor } from "$lib/designTokens";
+import { isAppStoreDistribution } from "$lib/distribution";
 import {
 	getAllSensorsForDisplay,
 	isPerCoreTemperatureUnavailable,
@@ -37,6 +38,7 @@ interface Props {
 const { fans, sensorData }: Props = $props();
 
 let hasWriteAccess: boolean = $state(false);
+let fanControlAvailable: boolean = $state(true);
 let bannerMessage: string = $state("Fan control requires elevated privileges.");
 let searchTerm: string = $state("");
 let showMenu: boolean = $state(false);
@@ -56,7 +58,11 @@ const diskSensors = $derived(partitions.disk);
 const perCoreUnavailable = $derived(isPerCoreTemperatureUnavailable(sensorData));
 const modelLabel = $derived(sensorData?.diagnostics?.model_id ?? "Unknown Mac");
 const fanAccessLabel = $derived(
-	hasWriteAccess ? "Fan control enabled" : "Fan control needs access",
+	!fanControlAvailable
+		? "Monitoring only"
+		: hasWriteAccess
+			? "Fan control enabled"
+			: "Fan control needs access",
 );
 const searchQuery = $derived(searchTerm.trim().toLowerCase());
 const filteredFans = $derived(
@@ -73,9 +79,12 @@ $effect(() => {
 	getPrivilegeStatus()
 		.then((status) => {
 			hasWriteAccess = status.has_write_access;
+			fanControlAvailable = status.fan_control_available;
+			bannerMessage = status.reason ?? "Fan control requires elevated privileges.";
 		})
 		.catch(() => {
 			hasWriteAccess = false;
+			fanControlAvailable = false;
 		});
 });
 
@@ -192,7 +201,7 @@ function openAboutDialog(): void {
         )}
       >
         <span>{bannerMessage}</span>
-        {#if !isDevMode}
+        {#if fanControlAvailable && !isDevMode}
           <button
             type="button"
             class={cn(buttonSecondary, "shrink-0 px-2.5 py-0.5 text-[11px]")}
@@ -247,9 +256,11 @@ function openAboutDialog(): void {
             <button type="button" class={cn("w-full rounded-[8px] px-2.5 py-1.5 text-left text-[12px] text-(--text-primary) hover:bg-(--surface-hover)")} role="menuitem" onclick={handlePreferences}>
               Preferences...
             </button>
-            <button type="button" class={cn("w-full rounded-[8px] px-2.5 py-1.5 text-left text-[12px] text-(--text-primary) hover:bg-(--surface-hover)")} role="menuitem" onclick={openUpdateDialog}>
-              Check for Updates
-            </button>
+            {#if !isAppStoreDistribution()}
+              <button type="button" class={cn("w-full rounded-[8px] px-2.5 py-1.5 text-left text-[12px] text-(--text-primary) hover:bg-(--surface-hover)")} role="menuitem" onclick={openUpdateDialog}>
+                Check for Updates
+              </button>
+            {/if}
             <button type="button" class={cn("w-full rounded-[8px] px-2.5 py-1.5 text-left text-[12px] text-(--text-primary) hover:bg-(--surface-hover)")} role="menuitem" onclick={openAboutDialog}>
               About FanGuard
             </button>
@@ -309,6 +320,7 @@ function openAboutDialog(): void {
   {#if showPreferences}
     <PreferencesDialog
       trayDisplayMode={trayDisplayMode}
+      {fanControlAvailable}
       onTrayModeChange={handleTrayModeChange}
       onclose={() => { showPreferences = false; }}
     />

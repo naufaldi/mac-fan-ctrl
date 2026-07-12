@@ -246,11 +246,11 @@ export function handleDevMockCommand(cmd: string, args?: unknown): unknown {
     case "get_active_preset":
       return "Automatic";
     case "get_privilege_status":
-      return { has_write_access: true };
+      return { has_write_access: true, fan_control_available: true, reason: null };
     case "get_tray_display_mode":
       return 0;
     case "get_app_info":
-      return { name: "FanGuard", version: "0.1.0-beta.4", identifier: "io.github.naufaldi.fanguard" };
+      return { name: "FanGuard", version: "0.1.0-beta.5", identifier: "io.github.naufaldi.fanguard" };
     case "get_power_preset_config":
       return { enabled: false, ac_preset: null, battery_preset: null };
     case "get_current_power_source":
