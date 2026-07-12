@@ -415,3 +415,17 @@ cargo build --profile=release-with-debug
 - [Rust Basics](./rust-basics.md) - Learn Rust fundamentals
 - [Tauri Architecture](./tauri-architecture.md) - Understand the stack
 - [Testing Strategy](./testing.md) - Deep dive into testing
+# Troubleshooting the Tauri development port
+
+FanGuard reserves `http://localhost:5173` for both Vite and Tauri. Vite uses
+`strictPort`, so development startup stops instead of silently moving to a port
+that Tauri is not configured to load.
+
+If startup reports that port 5173 is already in use, identify the owning process:
+
+```bash
+lsof -nP -iTCP:5173 -sTCP:LISTEN
+```
+
+Stop that development server, then run `pnpm run tauri dev` again. Do not change
+only the Vite port because `src-tauri/tauri.conf.json` must use the same URL.

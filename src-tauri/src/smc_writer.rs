@@ -41,13 +41,13 @@ pub enum SmcWriteError {
     ModeTransitionTimedOut,
     #[error("Fan mode verification failed: mode {actual} still blocks target writes")]
     ModeVerificationFailed { actual: u8 },
-    #[error(
-        "Fan {fan_index} target RPM verification failed: requested {requested}, actual {actual:?}"
-    )]
+    #[error("Fan control not available on this Mac: fan {fan_index} has no SMC mode key for safe manual control/restoration")]
+    UnsupportedFanControl { fan_index: u8 },
+    #[error("Fan target verification failed for fan {fan_index}: requested {requested:.0} RPM, read back {readback:.0} RPM")]
     TargetVerificationFailed {
         fan_index: u8,
         requested: f32,
-        actual: Option<f32>,
+        readback: f32,
     },
     #[error("Privileged helper is not running")]
     HelperNotRunning,
@@ -285,7 +285,7 @@ impl SmcWriter {
                         .to_string(),
                 );
                 lines.push(
-                    "  -> Direct F*Md writes may work (pre-14.4 firmware) or may be blocked"
+                    "  -> Safe manual fan control requires F*Md mode keys; absent mode keys are rejected"
                         .to_string(),
                 );
             }
@@ -509,9 +509,7 @@ impl SmcWriter {
             self.set_fan_mode(fan_index, true)?;
             self.verify_mode_allows_target_write(fan_index)?;
         } else {
-            debug_log!(
-                "[smc_writer] F{fan_index}Md key absent — skipping mode transition and writing F{fan_index}Tg directly"
-            );
+            return require_restorable_fan_mode(mode_capability, fan_index);
         }
 
         // Step 3: Write target RPM
@@ -530,21 +528,21 @@ impl SmcWriter {
         const MAX_VERIFY_ATTEMPTS: u8 = 3;
         const VERIFY_TOLERANCE: f64 = 50.0;
 
-        let mut verified = false;
+        let mut last_readback: Option<f32> = None;
         let mut attempt = 0u8;
-        let mut last_readback_rpm: Option<f32> = None;
 
-        while attempt < MAX_VERIFY_ATTEMPTS && !verified {
+        while attempt < MAX_VERIFY_ATTEMPTS {
             std::thread::sleep(Duration::from_millis(100));
             match self.read_key_bytes(key, key_info.data_size) {
                 Ok(readback) => {
                     let readback_rpm = decode_rpm(&readback, &type_bytes);
-                    last_readback_rpm = Some(readback_rpm);
-                    let diff = (readback_rpm - rpm).abs();
-                    if diff > VERIFY_TOLERANCE as f32 {
+                    last_readback = Some(readback_rpm);
+                    if let Err(error) =
+                        validate_target_readback(fan_index, rpm, readback_rpm, VERIFY_TOLERANCE)
+                    {
                         debug_log!(
-                            "[smc_writer] F{fan_index}Tg verify attempt {}/{MAX_VERIFY_ATTEMPTS}: wrote={rpm:.0} readback={readback_rpm:.0} (diff={diff:.0})"
-                            , attempt + 1
+                            "[smc_writer] F{fan_index}Tg verify attempt {}/{MAX_VERIFY_ATTEMPTS}: {error}",
+                            attempt + 1
                         );
                         // Retry the write
                         if attempt + 1 < MAX_VERIFY_ATTEMPTS {
@@ -552,7 +550,10 @@ impl SmcWriter {
                         }
                     } else {
                         debug_log!("[smc_writer] F{fan_index}Tg verified: {readback_rpm:.0} RPM");
-                        verified = true;
+                        debug_log!(
+                            "[smc_writer] set_fan_target_rpm: done fan={fan_index} rpm={rpm}"
+                        );
+                        return Ok(());
                     }
                 }
                 Err(e) => debug_log!(
@@ -563,10 +564,15 @@ impl SmcWriter {
             attempt += 1;
         }
 
-        validate_target_readback(fan_index, rpm, verified, last_readback_rpm)?;
-
-        debug_log!("[smc_writer] set_fan_target_rpm: done fan={fan_index} rpm={rpm}");
-        Ok(())
+        let readback = last_readback.unwrap_or(f32::NAN);
+        warn_log!(
+            "[smc_writer] F{fan_index}Tg write verification failed after {MAX_VERIFY_ATTEMPTS} attempts — RPM was not applied"
+        );
+        Err(SmcWriteError::TargetVerificationFailed {
+            fan_index,
+            requested: rpm,
+            readback,
+        })
     }
 
     /// Returns fan to automatic (system-controlled) mode.
@@ -580,8 +586,7 @@ impl SmcWriter {
         if mode_capability == FanModeCapability::Managed {
             self.set_fan_mode(fan_index, false)
         } else {
-            debug_log!("[smc_writer] F{fan_index}Md key absent — no auto mode to restore");
-            Ok(())
+            require_restorable_fan_mode(mode_capability, fan_index)
         }
     }
 
@@ -881,23 +886,6 @@ fn validate_mode_allows_target_write(actual_mode: u8) -> Result<(), SmcWriteErro
     }
 }
 
-fn validate_target_readback(
-    fan_index: u8,
-    requested: f32,
-    verified: bool,
-    actual: Option<f32>,
-) -> Result<(), SmcWriteError> {
-    if verified {
-        return Ok(());
-    }
-
-    Err(SmcWriteError::TargetVerificationFailed {
-        fan_index,
-        requested,
-        actual,
-    })
-}
-
 fn detect_fan_mode_capability(
     mode_key_info: Result<SmcKeyDataKeyInfo, SmcWriteError>,
 ) -> Result<FanModeCapability, SmcWriteError> {
@@ -906,6 +894,34 @@ fn detect_fan_mode_capability(
         Err(SmcWriteError::UnknownKey(_)) => Ok(FanModeCapability::Absent),
         Err(error) => Err(error),
     }
+}
+
+fn require_restorable_fan_mode(
+    mode_capability: FanModeCapability,
+    fan_index: u8,
+) -> Result<(), SmcWriteError> {
+    match mode_capability {
+        FanModeCapability::Managed => Ok(()),
+        FanModeCapability::Absent => Err(SmcWriteError::UnsupportedFanControl { fan_index }),
+    }
+}
+
+fn validate_target_readback(
+    fan_index: u8,
+    requested: f32,
+    readback: f32,
+    tolerance: f64,
+) -> Result<(), SmcWriteError> {
+    let diff = (readback - requested).abs();
+    if diff <= tolerance as f32 {
+        return Ok(());
+    }
+
+    Err(SmcWriteError::TargetVerificationFailed {
+        fan_index,
+        requested,
+        readback,
+    })
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -940,14 +956,6 @@ pub mod mock {
             Self {
                 calls: RefCell::new(Vec::new()),
                 should_fail: false,
-            }
-        }
-
-        #[allow(dead_code)]
-        pub fn failing() -> Self {
-            Self {
-                calls: RefCell::new(Vec::new()),
-                should_fail: true,
             }
         }
     }
@@ -1127,16 +1135,26 @@ mod tests {
     }
 
     #[test]
-    fn target_verification_failure_returns_error() {
-        let result = validate_target_readback(0, 5000.0, false, Some(2400.0));
+    fn require_restorable_fan_mode_rejects_absent_mode_key() {
+        let result = require_restorable_fan_mode(FanModeCapability::Absent, 0);
+
+        assert!(matches!(
+            result,
+            Err(SmcWriteError::UnsupportedFanControl { fan_index: 0 })
+        ));
+    }
+
+    #[test]
+    fn validate_target_readback_rejects_mismatch() {
+        let result = validate_target_readback(0, 5000.0, 4049.0, 50.0);
 
         assert!(matches!(
             result,
             Err(SmcWriteError::TargetVerificationFailed {
                 fan_index: 0,
-                requested,
-                actual: Some(actual),
-            }) if requested == 5000.0 && actual == 2400.0
+                requested: 5000.0,
+                readback: 4049.0
+            })
         ));
     }
 
@@ -1180,22 +1198,11 @@ mod tests {
         let max_rpm = decode_rpm(&max_bytes, &max_type);
         let safe_target = current_target.clamp(min_rpm, max_rpm);
 
-        writer
-            .set_fan_target_rpm_impl(fan_index, safe_target, min_rpm, max_rpm)
-            .expect("target write should succeed without F*Md");
+        let result = writer.set_fan_target_rpm_impl(fan_index, safe_target, min_rpm, max_rpm);
 
-        let readback = writer
-            .read_key_bytes(fan_key(fan_index, b"Tg"), target_info.data_size)
-            .expect("target readback should succeed");
-        let readback_rpm = decode_rpm(&readback, &target_type);
-
-        assert!(
-            (readback_rpm - safe_target).abs() <= 50.0,
-            "expected target readback near {safe_target}, got {readback_rpm}"
-        );
-
-        writer
-            .set_fan_auto_impl(fan_index)
-            .expect("auto should be a no-op when F*Md is absent");
+        assert!(matches!(
+            result,
+            Err(SmcWriteError::UnsupportedFanControl { fan_index: 0 })
+        ));
     }
 }

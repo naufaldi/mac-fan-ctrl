@@ -5,10 +5,11 @@ import {
 	getReadMoreLabel,
 	getSummarySensorsForDisplay,
 	isPerCoreTemperatureUnavailable,
+	partitionDisplaySensors,
 	SUMMARY_SENSOR_LIMIT,
 	shouldShowReadMore,
 } from "./sensorListPaneState";
-import type { SensorData } from "./types";
+import type { Sensor, SensorData } from "./types";
 
 const emptyFans = { fans: [] as SensorData["fans"] };
 
@@ -200,9 +201,8 @@ describe("sensorListPaneState", () => {
 
 		const allSensors = getAllSensorsForDisplay(sensorData);
 
-		// Temperature sensors with no data on this hardware are hidden; storage sensors remain
+		// Sensors with no data on this hardware are hidden; disk marker remains
 		expect(allSensors.map((sensor) => sensor.name)).toEqual([
-			"Battery",
 			"CPU Core Average",
 			"CPU Efficiency Core 1",
 			"CPU Efficiency Core 2",
@@ -210,12 +210,12 @@ describe("sensorListPaneState", () => {
 			"GPU Cluster 1",
 			"GPU Cluster 2",
 			"GPU Cluster Average",
+			"Battery",
 			"Disk Drives:",
-			"APPLE SSD",
 		]);
 
 		expect(allSensors.find((sensor) => sensor.name === "Disk Drives:")?.value).toBeNull();
-		expect(allSensors.find((sensor) => sensor.name === "APPLE SSD")?.value).toBeNull();
+		expect(allSensors.find((sensor) => sensor.name === "APPLE SSD")).toBeUndefined();
 		expect(allSensors.find((sensor) => sensor.name === "GPU Cluster Average")?.value).toBe(59);
 	});
 
@@ -400,5 +400,33 @@ describe("sensorListPaneState", () => {
 
 		expect(isPerCoreTemperatureUnavailable(sensorData)).toBe(false);
 		expect(isPerCoreTemperatureUnavailable(null)).toBe(false);
+	});
+
+	it("splits the flat display list into temperature and disk groups", () => {
+		const sensors: Sensor[] = [
+			{ key: "TB0T", name: "Battery", value: 34, unit: "C", sensor_type: "Battery" },
+			{ key: "TCPUAVG", name: "CPU Core Average", value: 55, unit: "C", sensor_type: "Cpu" },
+			{ key: "DISK_SECTION", name: "Disk Drives:", value: null, unit: "C", sensor_type: "Storage" },
+			{ key: "TN0n", name: "APPLE SSD", value: null, unit: "C", sensor_type: "Storage" },
+		];
+
+		const partitions = partitionDisplaySensors(sensors);
+
+		expect(partitions.temperature.map((s) => s.name)).toEqual([
+			"Battery",
+			"CPU Core Average",
+		]);
+		expect(partitions.disk.map((s) => s.name)).toEqual(["APPLE SSD"]);
+	});
+
+	it("treats a list without the disk marker as all temperature sensors", () => {
+		const sensors: Sensor[] = [
+			{ key: "TB0T", name: "Battery", value: 34, unit: "C", sensor_type: "Battery" },
+		];
+
+		const partitions = partitionDisplaySensors(sensors);
+
+		expect(partitions.temperature).toHaveLength(1);
+		expect(partitions.disk).toHaveLength(0);
 	});
 });

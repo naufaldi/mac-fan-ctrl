@@ -293,6 +293,43 @@ pub fn set_fan_auto(app_handle: AppHandle, fan_index: u8) -> Result<(), String> 
 }
 
 #[tauri::command]
+pub fn set_all_fans_constant_rpm(
+    state: State<'_, AppState>,
+    rpm: f32,
+) -> Result<(), String> {
+    let writer_guard = state.smc_writer.lock().map_err(|error| error.to_string())?;
+    let writer = writer_guard.as_deref().ok_or_else(|| {
+        "Fan control unavailable — install or reconnect the privileged helper".to_string()
+    })?;
+    let mut service = SensorService::new();
+    let sensor_data = service.read_all_sensors().map_err(|error| error.to_string())?;
+
+    state
+        .fan_control
+        .lock()
+        .map_err(|error| error.to_string())?
+        .set_all_constant_rpm(rpm, &sensor_data.fans, writer)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn restore_all_fans_auto(state: State<'_, AppState>) -> Result<(), String> {
+    let writer_guard = state.smc_writer.lock().map_err(|error| error.to_string())?;
+    let writer = writer_guard.as_deref().ok_or_else(|| {
+        "Fan control unavailable — install or reconnect the privileged helper".to_string()
+    })?;
+    let mut service = SensorService::new();
+    let sensor_data = service.read_all_sensors().map_err(|error| error.to_string())?;
+
+    state
+        .fan_control
+        .lock()
+        .map_err(|error| error.to_string())?
+        .restore_detected_fans_auto(&sensor_data.fans, writer)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn get_fan_control_configs(
     state: State<'_, AppState>,
 ) -> Result<HashMap<u8, FanControlConfig>, String> {

@@ -7,80 +7,99 @@ select {
 }
 
 @theme {
-  /* Fonts — Apple system fonts for UI/data, DM Sans (Waldenburg substitute) for display */
-  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace;
-  --font-display: "DM Sans", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
-
-  /* Parchment palette (see docs/design.md) */
-  --color-parchment-white: #fdfcfc;
-  --color-warm-sand: #f5f3f1;
-  --color-sand-hover: #efedea;
-  --color-ash-border: #e5e5e5;
-  --color-ash-strong: #d4d4d4;
-  --color-midnight-ink: #000000;
-  --color-driftwood: #777169;
-  --color-fog: #a59f97;
-  --color-silver-mist: #b1b0b0;
-  --color-ember-orange: #ff4704;
-  --color-void-violet: #0447ff;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace;
 }
 
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
 
-  /* Surfaces — parchment canvas + warm sand + elevated */
-  --surface-0: var(--color-parchment-white);
-  --surface-1: var(--color-parchment-white);
-  --surface-2: var(--color-warm-sand);
-  --surface-muted: var(--color-warm-sand);
-  --surface-hover: var(--color-sand-hover);
-  --surface-elevated: #ffffff;
+  --window-background: rgb(255 255 255 / 76%);
+  --desktop-background:
+    radial-gradient(circle at 16% 18%, rgb(248 243 238 / 86%), transparent 28%),
+    radial-gradient(circle at 84% 10%, rgb(181 203 222 / 76%), transparent 34%),
+    radial-gradient(circle at 70% 92%, rgb(136 151 165 / 62%), transparent 36%),
+    linear-gradient(135deg, rgb(232 228 223), rgb(191 205 216) 46%, rgb(230 231 230));
+  --surface-0: rgb(242 244 247);
+  --surface-1: rgb(255 255 255 / 58%);
+  --surface-2: rgb(248 249 251 / 62%);
+  --surface-muted: rgb(240 242 245 / 78%);
+  --surface-hover: rgb(0 0 0 / 5%);
+  --surface-elevated: rgb(255 255 255 / 92%);
 
-  /* Borders — hairline ash */
-  --border-subtle: var(--color-ash-border);
-  --border-strong: var(--color-ash-strong);
+  --material-window: rgb(255 255 255 / 50%);
+  --material-toolbar: rgb(246 248 251 / 58%);
+  --material-control: rgb(255 255 255 / 62%);
+  --material-sheet: rgb(255 255 255 / 86%);
+  --material-popover: rgb(255 255 255 / 82%);
 
-  /* Text — ink / driftwood / fog */
-  --text-primary: var(--color-midnight-ink);
-  --text-secondary: var(--color-driftwood);
-  --text-muted: var(--color-fog);
-  --text-value: var(--color-midnight-ink);
+  --border-subtle: rgb(0 0 0 / 12%);
+  --border-strong: rgb(0 0 0 / 22%);
+  --table-column-separator: rgb(0 0 0 / 10%);
+  --table-row-alternating: rgb(0 0 0 / 4%);
+  --table-section-background: rgb(246 247 249 / 56%);
 
-  /* Focus — ink ring, no blue */
-  --focus-ring: var(--color-midnight-ink);
-  --focus-ring-offset: var(--color-parchment-white);
+  --text-primary: rgb(0 0 0 / 88%);
+  --text-secondary: rgb(0 0 0 / 58%);
+  --text-muted: rgb(0 0 0 / 36%);
+  --text-value: rgb(0 0 0 / 78%);
 
-  /* Active control — filled ink (HIG segmented/primary) */
-  --control-active-bg: var(--color-midnight-ink);
-  --control-active-border: var(--color-midnight-ink);
-  --control-active-text: #ffffff;
+  --accent-blue: rgb(0 120 240);
+  --accent-blue-pressed: rgb(1 101 226);
+  --selection-active: rgb(1 101 226);
+  --focus-ring: rgb(0 120 240 / 55%);
+  --focus-ring-offset: rgb(255 255 255 / 90%);
 
-  /* Status — monochrome, ember reserved for hot (>=85C) */
-  --status-normal: var(--color-driftwood);
-  --status-warm: var(--color-driftwood);
-  --status-hot: var(--color-ember-orange);
-  --status-unknown: var(--color-silver-mist);
+  --status-normal: rgb(52 199 89);
+  --status-warm: rgb(255 204 0);
+  --status-hot: rgb(255 69 58);
+  --status-unknown: rgb(142 142 147);
+
   --color-status-normal: var(--status-normal);
   --color-status-warm: var(--status-warm);
   --color-status-hot: var(--status-hot);
   --color-status-unknown: var(--status-unknown);
-  --color-surface-card: var(--surface-2);
+  --color-surface-card: var(--surface-1);
   --color-surface-hover: var(--surface-hover);
 
-  /* Radii — Apple HIG geometry */
-  --radius-card: 12px;
-  --radius-button: 7px;
-  --radius-segmented: 6px;
-  --radius-input: 5px;
-  --radius-dialog: 10px;
-  --radius-capsule: 9999px;
-  --radius-dot: 9999px;
+  --radius-card: 18px;
+  --radius-dot: 50%;
+}
 
-  /* Shadows — hairline only */
-  --shadow-hairline: rgba(0, 0, 0, 0.06) 0px 0px 0px 1px, rgba(0, 0, 0, 0.04) 0px 1px 2px 0px;
-  --shadow-elevated: rgba(0, 0, 0, 0.4) 0px 0px 1px 0px, rgba(0, 0, 0, 0.04) 0px 1px 1px 0px, rgba(0, 0, 0, 0.04) 0px 2px 4px 0px;
-  --shadow-inset: rgba(0, 0, 0, 0.075) 0px 0px 0px 0.5px inset;
+@media (prefers-color-scheme: dark) {
+  :root {
+    --window-background: rgb(30 31 34 / 76%);
+    --desktop-background:
+      radial-gradient(circle at 16% 18%, rgb(75 70 66 / 86%), transparent 28%),
+      radial-gradient(circle at 84% 10%, rgb(54 68 82 / 76%), transparent 34%),
+      radial-gradient(circle at 70% 92%, rgb(33 39 46 / 62%), transparent 36%),
+      linear-gradient(135deg, rgb(42 42 44), rgb(34 42 50) 46%, rgb(30 31 34));
+    --surface-0: rgb(24 25 28);
+    --surface-1: rgb(36 37 41 / 84%);
+    --surface-2: rgb(43 44 48 / 76%);
+    --surface-muted: rgb(50 51 56 / 72%);
+    --surface-hover: rgb(255 255 255 / 7%);
+    --surface-elevated: rgb(46 47 52 / 88%);
+
+    --material-window: rgb(34 35 39 / 74%);
+    --material-toolbar: rgb(42 43 48 / 70%);
+    --material-control: rgb(255 255 255 / 9%);
+    --material-sheet: rgb(44 45 50 / 88%);
+    --material-popover: rgb(50 51 56 / 88%);
+
+    --border-subtle: rgb(255 255 255 / 12%);
+    --border-strong: rgb(255 255 255 / 24%);
+    --table-column-separator: rgb(255 255 255 / 11%);
+    --table-row-alternating: rgb(255 255 255 / 5%);
+    --table-section-background: rgb(255 255 255 / 6%);
+
+    --text-primary: rgb(255 255 255 / 88%);
+    --text-secondary: rgb(255 255 255 / 62%);
+    --text-muted: rgb(255 255 255 / 38%);
+    --text-value: rgb(255 255 255 / 84%);
+
+    --focus-ring-offset: rgb(31 32 36 / 92%);
+  }
 }
 
 html,
@@ -95,10 +114,64 @@ body,
 
 body {
   font-family: var(--font-ui);
-  font-size: 13px;
-  letter-spacing: 0.01em;
-  background-color: var(--surface-0);
+  font-size: 12px;
+  background:
+    radial-gradient(circle at 20% 0%, rgb(255 255 255 / 60%), transparent 32%),
+    var(--surface-0);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+@supports ((backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px))) {
+  .bg-\(\--material-window\),
+  .bg-\(\--material-toolbar\),
+  .bg-\(\--material-control\),
+  .bg-\(\--material-sheet\),
+  .bg-\(\--material-popover\) {
+    -webkit-backdrop-filter: blur(22px) saturate(1.35);
+    backdrop-filter: blur(22px) saturate(1.35);
+  }
+}
+
+.liquid-range {
+  --range-progress: 50%;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--accent-blue) 0%,
+    var(--accent-blue) var(--range-progress),
+    rgb(0 0 0 / 24%) var(--range-progress),
+    rgb(0 0 0 / 24%) 100%
+  );
+  outline: none;
+}
+
+.liquid-range::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgb(0 0 0 / 12%);
+  background: rgb(255 255 255);
+  box-shadow:
+    0 3px 8px rgb(0 0 0 / 20%),
+    inset 0 0 0 0.5px rgb(255 255 255 / 90%);
+}
+
+.liquid-range::-moz-range-thumb {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgb(0 0 0 / 12%);
+  background: rgb(255 255 255);
+  box-shadow: 0 3px 8px rgb(0 0 0 / 20%);
+}
+
+.liquid-range:disabled {
+  opacity: 0.45;
 }

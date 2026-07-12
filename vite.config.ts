@@ -13,7 +13,7 @@ export default defineConfig({
 		svelte() as unknown as PluginOption,
 	],
 	server: {
-		port: 1420,
+		port: 5173,
 		strictPort: true,
 		hmr: {
 			overlay: true,
