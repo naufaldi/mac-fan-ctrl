@@ -52,9 +52,19 @@ export APPLE_PASSWORD="app-specific-password"
 export APPLE_TEAM_ID="YOUR_TEAM_ID"
 ```
 
-### Manual Notarization
+### Local Notarized Build
 
-After building with `pnpm tauri:build:direct`:
+Store the notarization variables in `~/.config/fanguard/notarization.env`, then run:
+
+```bash
+./scripts/build-local-notarized.sh
+```
+
+The wrapper builds the direct-distribution app, submits the final DMG, staples it,
+mounts it, and verifies the app, helper, Gatekeeper assessment, and stapler ticket.
+It rejects ambiguous output directories containing more than one DMG.
+
+For manual troubleshooting after `pnpm tauri:build:direct`:
 
 ```bash
 # Submit for notarization

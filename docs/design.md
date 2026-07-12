@@ -1,227 +1,459 @@
-# FanGuard — Design System
+# FanGuard Design System - macOS 27 Liquid Glass
 
-> Parchment command terminal meets Apple HIG — warm paper surfaces beneath monochrome native controls, with a single ember signal reserved for heat.
+FanGuard follows a native macOS 27 utility direction based on the community Figma file:
 
-FanGuard adopts the **ElevenLabs** warm-parchment visual language ([refero.design style](https://styles.refero.design/style/031056ff-7af1-46db-8daa-115f731c5d26)) and delivers it through **Apple Human Interface Guidelines** geometry so the app feels native to macOS rather than like a web marketing page dropped into a utility window.
+- File: `macOS 27 (Community)`
+- Link: https://www.figma.com/design/57pdOQpJuHYSqIFLpmL8kO/macOS-27--Community-?node-id=684-19522
+- Verified node: `684:19522`, named `List`, size `1512 x 982`
+- Relevant pages in the file: `Colors`, `Materials`, `Text Styles`, `Windows`, `Buttons`, `Lists and Tables`, `Sidebars`, `Toolbars`, `Segmented Controls`, `Search Fields`, `Sheets`, `Popovers`, `Toggles`
 
-The core idea: an off-white parchment canvas (`#fdfcfc`) layered with warm-sand surfaces (`#f5f3f1`) separated by hairline `#e5e5e5` dividers. All interactive chrome is monochrome ink (`#000000`) on parchment — color is never used as a call to action. The one sanctioned exception is **Ember Orange `#ff4704`**, used exclusively as a restrained safety signal for hot temperatures (≥85°C). Elevation comes from surface contrast and 1px hairlines, never from soft blurs.
+This document is the product-specific translation of that Figma system for FanGuard. Treat it as the design source for future frontend work, not as a generic macOS reference.
 
----
+## Canonical V1 Screen
 
-## Apple HIG Adaptation
+The canonical v1 screen is the generated FanGuard dashboard image selected in the design discussion. The Figma macOS 27 system provides the material language, but the generated image defines the actual FanGuard composition.
 
-The ElevenLabs reference is a web-marketing system (9999px pill buttons, 20–24px rounded cards, Inter/Geist Mono, decorative gradient orbs). FanGuard is a macOS desktop utility, so the parchment *palette* is mapped onto native macOS *geometry*:
+Implementation must match this screen before introducing alternate layouts:
 
-| ElevenLabs (web) | FanGuard (macOS HIG) |
+- floating rounded macOS window over a blurred desktop background,
+- traffic-light controls in the top-left,
+- toolbar with `FanGuard`, centered `Preset: Automatic`, search field, and overflow menu,
+- no sidebar and no back/forward navigation,
+- one framed `FAN CONTROL` section above the table,
+- one global `Auto / Manual` segmented control,
+- `Manual` selected in the preview state,
+- target slider with `1200`, `3200 RPM`, `6550`, and current average under the track,
+- `Apply` primary button before `Restore Auto`,
+- info row reading `Applies to all fans.`,
+- framed dense table with columns `Name`, `Value`, `Range`, `Mode`, `Status`,
+- group rows for `FANS`, `TEMPERATURE SENSORS`, and `DISK DRIVES`,
+- preview data with `System Fan 1`, `System Fan 2`, `System Fan 3`, and `Synced` fan modes,
+- preview disk rows `APPLE SSD AP0512Q` and `SanDisk Extreme Pro`,
+- bottom status bar with `SMC Connected`, model id, `Fan control enabled`, and last update.
+
+If this document and the generated image disagree, the generated image wins and this document should be corrected.
+
+## Design Intent
+
+FanGuard should feel like a first-party macOS utility for thermal monitoring and fan control. The interface is quiet, dense, and system-native. It should look closer to Finder, Activity Monitor, Console, or System Settings than to a web dashboard.
+
+The Liquid Glass direction comes from layering, translucency, subtle material separation, rounded window geometry, and native control styling. It is not decorative glassmorphism. Blur and transparency should support hierarchy, not become the subject of the UI.
+
+### Principles
+
+- Prefer native macOS structure over custom web layout.
+- Use Liquid Glass materials for window, toolbar, fan control, sheets, and popovers.
+- Keep the main data area dense, scannable, and table-driven.
+- Use system typography: SF Pro Text for UI, SF Mono for metrics.
+- Use accent blue for active selection and primary confirmation only.
+- Use semantic temperature colors only for thermal state.
+- Avoid marketing-page spacing, decorative cards, custom pill controls, and large display typography.
+
+## Source Observations
+
+The verified Figma `List` frame shows:
+
+- macOS menu bar above the window.
+- rounded app window with large continuous corner radius.
+- traffic-light controls in the top-left.
+- translucent window and toolbar materials.
+- unified toolbar with grouped icon controls and a native search field.
+- main content table with dense rows, column headers, separators, group labels, active blue row selection, and a thin scrollbar.
+- light and dark variants for many window examples.
+
+The selected frame inspector exposed these relevant variables:
+
+| Figma variable | Observed value | FanGuard role |
+| --- | --- | --- |
+| `Window Background` | `#FFF` at `100%` | Main content surface |
+| `Labels/Primary` | `#000` at `85%` | Primary text |
+| `Labels/Secondary` | `#000` at `50%` | Secondary text |
+| `Labels - Vibrant (Use Plus Lighter | Darker)/Primary` | `#1A1A1A` at `100%` | Text on translucent material |
+| `Labels - Vibrant (Use Plus Lighter | Darker)/Secondary` | `#727272` at `100%` | Secondary text on translucent material |
+| `Labels - Vibrant (Use Plus Lighter | Darker)/Quaternary` | `#D9D9D9` at `100%` | Faint dividers and inactive affordances |
+| `Accents - Vibrant/Blue` | `#0078F0` at `100%` | Accent and selected controls |
+| `Miscellaneous/Tables/BG - Selected + Active` | `#0165E2` at `100%` | Active selected table row |
+| `Miscellaneous/Tables/Alternating Row Color` | `#000` at `5%` | Alternating table row |
+| `Miscellaneous/Tables/Column Separator` | `#000` at `10%` | Table column divider |
+| `Miscellaneous/Scrollbar` | `#000` at `50%` | Scrollbar thumb |
+
+## Tokens
+
+### Typography
+
+| Token | Value | Usage |
+| --- | --- | --- |
+| `--font-ui` | `-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif` | Labels, buttons, rows, toolbar, dialogs |
+| `--font-mono` | `"SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace` | Temperatures, RPM, timestamps, numeric columns |
+
+Use `font-variant-numeric: tabular-nums` for all thermal values, RPM values, percentages, dates, and aligned metrics.
+
+| Role | Size | Weight | Line height | Notes |
+| --- | --- | --- | --- | --- |
+| Table row label | `13px` | `400` | `18px` | Primary scanner text |
+| Table value | `12px` | `400` | `18px` | Use mono and tabular nums |
+| Table header | `11px` | `500` | `16px` | Muted, compact |
+| Section label | `11px` | `600` | `16px` | Upper/lowercase follows Figma page conventions |
+| Toolbar title | `13px` | `600` | `18px` | Window or active view title |
+| Dialog title | `13px` | `600` | `18px` | Native sheet/dialog title |
+| Helper text | `11px` | `400` | `16px` | Muted explanatory text |
+
+### Color
+
+Use semantic tokens instead of hard-coded colors in components.
+
+```css
+:root {
+  color-scheme: light dark;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace;
+
+  --color-window-background: rgb(255 255 255);
+  --color-label-primary: rgb(0 0 0 / 85%);
+  --color-label-secondary: rgb(0 0 0 / 50%);
+  --color-label-vibrant-primary: rgb(26 26 26);
+  --color-label-vibrant-secondary: rgb(114 114 114);
+  --color-label-quaternary: rgb(217 217 217);
+
+  --color-accent-blue: rgb(0 120 240);
+  --color-selection-active: rgb(1 101 226);
+  --color-table-row-alternating: rgb(0 0 0 / 5%);
+  --color-table-separator: rgb(0 0 0 / 10%);
+  --color-scrollbar: rgb(0 0 0 / 50%);
+
+  --color-status-normal: rgb(52 199 89);
+  --color-status-warm: rgb(255 204 0);
+  --color-status-hot: rgb(255 69 58);
+  --color-status-unknown: rgb(142 142 147);
+}
+```
+
+Dark mode should mirror the same token names with inverted label colors and darker materials. Do not fork component structure for dark mode; only token values should change.
+
+### Materials
+
+Liquid Glass is represented with layered materials:
+
+| Token | Role | Implementation guidance |
+| --- | --- | --- |
+| `--material-window` | App window body | Mostly opaque surface with subtle translucency and system blur |
+| `--material-toolbar` | Unified top toolbar | Translucent material over the window, with subtle bottom separator |
+| `--material-control` | Buttons, search field, segmented controls | Small translucent surface with hairline border and inner highlight |
+| `--material-sheet` | Dialogs and sheets | Floating material above window, stronger shadow and backdrop separation |
+| `--material-popover` | Menus and compact overlays | Compact floating material with native corner radius and shadow |
+
+For CSS, use `background-color`, `backdrop-filter: blur(...) saturate(...)`, and subtle inset borders. Avoid heavy shadows. The material should read as native glass, not as a blurred card.
+
+### Spacing and Density
+
+Use a 4px base unit. FanGuard is a dense utility, so most layout spacing should stay in the `4px`, `6px`, `8px`, `12px`, and `16px` range.
+
+| Token | Value | Usage |
+| --- | --- | --- |
+| `--space-1` | `4px` | Icon gaps, separator offsets |
+| `--space-1-5` | `6px` | Compact row internals |
+| `--space-2` | `8px` | Toolbar and table cell padding |
+| `--space-3` | `12px` | Toolbar padding, control groups |
+| `--space-4` | `16px` | Window edge and dialog padding |
+| `--space-6` | `24px` | Dialog section separation |
+
+| Element | Target size |
 | --- | --- |
-| 9999px pill buttons | 7px rectangular rounded push buttons (macOS standard) |
-| Pill toggle tabs | HIG segmented control (connected 6px segments) |
-| Text-link preset menu | HIG pop-up button (rectangular rounded + chevron) |
-| 20–24px floating rounded cards | Edge-to-edge panes with 1px hairline dividers |
-| Inter + Geist Mono | SF Pro Text (UI) + SF Mono (data) — Apple system fonts |
-| Decorative violet/orange gradient orbs | Omitted (not appropriate for a utility) |
-| 4px flush editorial inputs | 5px native macOS text fields |
+| Table row height | `22px` to `26px` |
+| Toolbar height | `52px` to `64px` depending on title layout |
+| Compact icon button | `28px` square |
+| Search field height | `30px` to `32px` |
+| Segmented control height | `28px` to `30px` |
 
-Native window chrome (traffic-light close/minimize/zoom buttons, title bar) stays OS-provided via Tauri `decorations: true`. Motion is calm and restrained — no cinematic physics, consistent with macOS system utilities. `9999px` capsules are reserved only for HIG capsule contexts (e.g. small status badges); they are not the default button shape.
+### Radius
 
----
+| Element | Radius |
+| --- | --- |
+| App window | `22px` to `26px` |
+| Sheets/dialogs | `18px` to `22px` |
+| Popovers | `14px` to `18px` |
+| Toolbar controls | `8px` to `12px` |
+| Table selected rows | `6px` |
+| Status dots | `50%` |
 
-## Tokens — Colors
+## Application Layout
 
-| Name | Value | Token | Role |
-| --- | --- | --- | --- |
-| Parchment White | `#fdfcfc` | `--color-parchment-white` | Window canvas — the dominant background |
-| Warm Sand | `#f5f3f1` | `--color-warm-sand` | Secondary surface — table headers, inset panes, hover base |
-| Sand Hover | `#efedea` | `--color-sand-hover` | Row/control hover (one step darker than Warm Sand) |
-| Ash Border | `#e5e5e5` | `--color-ash-border` | All hairline borders and dividers |
-| Ash Strong | `#d4d4d4` | `--color-ash-strong` | Emphasized borders (dialog outlines, pressed states) |
-| Midnight Ink | `#000000` | `--color-midnight-ink` | Primary text, headline text, filled control background, icon fills |
-| Driftwood | `#777169` | `--color-driftwood` | Secondary text, muted labels, icon strokes |
-| Fog | `#a59f97` | `--color-fog` | Tertiary helper text, placeholder text |
-| Silver Mist | `#b1b0b0` | `--color-silver-mist` | Unknown/null status, disabled chrome |
-| Ember Orange | `#ff4704` | `--color-ember-orange` | **Safety only** — hot temperature (≥85°C) signal |
-| Void Violet | `#0447ff` | `--color-void-violet` | **Decorative only** — unused in utility chrome (reserved) |
+FanGuard uses the generated single-window dashboard layout. It does not use a persistent sidebar because the core workflow is one screen: set global fan behavior, then scan grouped telemetry.
 
-### Semantic status mapping
-
-Temperature status is monochrome by default; ember appears only for hot:
-
-| Status | Condition | Token |
-| --- | --- | --- |
-| normal | `< 70°C` | `--color-driftwood` (monochrome dot) |
-| warm | `70–84°C` | `--color-driftwood` (monochrome dot — no yellow) |
-| hot | `≥ 85°C` | `--color-ember-orange` (the single safety signal) |
-| unknown | `null` / N/A | `--color-silver-mist` |
-
----
-
-## Tokens — Typography
-
-Type is set in Apple's system fonts for UI/data, with DM Sans weight 300 reserved for display-size headings (the ElevenLabs "Waldenburg weight 300" personality, via its documented DM Sans 300 substitute).
-
-### Font families
-
-| Role | Family | Token | Weights |
-| --- | --- | --- | --- |
-| UI text | SF Pro Text (system) | `--font-ui` | 400, 500 |
-| Data / metrics | SF Mono (system) | `--font-mono` | 400, tabular-nums |
-| Display headings | DM Sans | `--font-display` | 300 (Waldenburg substitute) |
-
-Font stacks:
-```
---font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
---font-mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace;
---font-display: "DM Sans", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+```text
++--------------------------------------------------------------+
+| traffic lights   FanGuard        preset/search/actions       |
++--------------------------------------------------------------+
+| FAN CONTROL: Auto / Manual, target RPM slider                |
++--------------------------------------------------------------+
+| Name                  Value        Range        Mode Status   |
+| Fans                                                        v |
+| System Fan 1          2532 RPM     1200-6550    Synced OK     |
+| System Fan 2          2200 RPM     1200-6550    Synced OK     |
+| System Fan 3          2000 RPM     1200-6550    Synced OK     |
+| Temperature Sensors                                      v   |
+| CPU Core Average      56 C         40-100       -    Normal   |
+| Disk Drives                                               v   |
+| APPLE SSD AP0512Q      38 C        20-70        -    OK       |
+| SanDisk Extreme Pro    36 C        20-70        -    OK       |
++--------------------------------------------------------------+
+| SMC Connected   Mac model   Fan control state   Last update   |
++--------------------------------------------------------------+
 ```
 
-> **Implementation note:** `--font-display` prefers DM Sans 300 (the documented Waldenburg substitute) when bundled, but falls back to the Apple system font at weight 300 with `-0.02em` tracking. On macOS this renders as SF Pro Display Light — which carries the same light, tightly-tracked headline personality natively and keeps the app fully offline. DM Sans is optional to bundle; the fallback is the default rendering.
+### Window
 
-### Type scale (utility-dense)
+- Use a single rounded macOS window container inside the app preview.
+- Traffic-light controls belong in the upper-left of the generated window shell.
+- Content should feel edge-to-edge inside the native window, with only the fan-control and table frames inset.
+- Prefer a unified toolbar over a separate web-style header.
+- Minimum window sizing should preserve the toolbar, global fan control, full table frame, status bar, and several rows.
 
-| Role | Size | Line height | Letter spacing | Weight | Font |
-| --- | --- | --- | --- | --- | --- |
-| caption | 10px | 1.4 | 0.1px | 400 | SF Pro Text |
-| micro | 11px | 1.45 | 0.11px | 400/500 | SF Pro Text |
-| label | 12px | 1.45 | 0.12px | 400/500 | SF Pro Text |
-| body | 13px | 1.5 | 0.13px | 400 | SF Pro Text |
-| data | 13px | 1.4 | 0 | 400 | SF Mono (tabular-nums) |
-| subheading | 15px | 1.45 | 0.15px | 500 | SF Pro Text |
-| heading-sm | 20px | 1.3 | -0.2px | 300 | DM Sans |
-| heading | 28px | 1.2 | -0.56px | 300 | DM Sans |
-| display | 36px | 1.13 | -0.72px | 300 | DM Sans |
+### Navigation Model
 
-All numeric metrics (RPM, °C, percentages) use `font-variant-numeric: tabular-nums` via SF Mono so columns align and values don't jitter.
+FanGuard does not need a sidebar for the main dashboard. Fans, temperature sensors, and disk drives are visible as disclosure groups inside the main table because they are data categories, not separate screens.
 
----
+Use a sidebar only if the product later gains real multi-screen navigation such as logs, alerts, history, or advanced rules. Do not add navigation solely to mirror the Figma reference.
 
-## Tokens — Spacing, Radii, Shadows
+### Toolbar
 
-### Spacing
+The toolbar is unified with the window title area and must follow the generated image:
 
-Base unit `4px`. Common steps: `4, 8, 12, 16, 20, 24, 32`. Pane padding `12–16px`; dialog padding `20–24px`; element gap `8px`.
+- traffic lights at far left,
+- `FanGuard` title next to them,
+- centered preset pop-up labeled `Preset: Automatic`,
+- search field near the right edge,
+- one compact overflow menu at far right.
 
-### Border radius (HIG)
+Do not include fake back/forward navigation or toolbar icons without real behavior. Text labels are acceptable where macOS would normally show them, such as primary confirmation in a sheet.
 
-| Element | Value | Token |
-| --- | --- | --- |
-| push button | 7px | `--radius-button` |
-| segmented control | 6px | `--radius-segmented` |
-| input / text field | 5px | `--radius-input` |
-| dialog / panel | 10px | `--radius-dialog` |
-| list card | 12px | `--radius-card` |
-| capsule badge | 9999px | `--radius-capsule` (reserved) |
+### Main Content
 
-### Shadows (hairline only)
+The main content area is table-first:
 
-| Name | Value | Token |
-| --- | --- | --- |
-| hairline ring | `rgba(0,0,0,0.06) 0 0 0 1px, rgba(0,0,0,0.04) 0 1px 2px 0` | `--shadow-hairline` |
-| elevated panel | `rgba(0,0,0,0.4) 0 0 1px 0, rgba(0,0,0,0.04) 0 1px 1px 0, rgba(0,0,0,0.04) 0 2px 4px 0` | `--shadow-elevated` |
-| inset | `rgba(0,0,0,0.075) 0 0 0 0.5px inset` | `--shadow-inset` |
+- fan rows,
+- temperature sensor rows,
+- disk rows,
+- derived or unavailable rows when useful.
 
-Blur never exceeds 4px and opacity never exceeds 0.04. Elevation is primarily signaled by surface contrast (`#fdfcfc` → `#f5f3f1` → `#ffffff`) and 1px `#e5e5e5` dividers.
+Use native list/table styling:
 
----
+- compact row heights,
+- optional alternating row fill,
+- muted column headers,
+- subtle column separators,
+- active row selection in macOS blue,
+- right-aligned numeric values,
+- sticky header when the table scrolls,
+- thin scrollbar.
 
-## Surfaces
-
-| Level | Name | Value | Purpose |
-| --- | --- | --- | --- |
-| 1 | Canvas | `#fdfcfc` | Window background, pane/row base |
-| 2 | Warm Sand | `#f5f3f1` | Table headers, inset panes, secondary tiles |
-| 3 | Border | `#e5e5e5` | Hairline borders and dividers |
-| 4 | Elevated | `#ffffff` | Dialog panels and floating menus (with `--shadow-elevated`) |
-
----
+Do not use repeated floating cards for sensors. FanGuard is a monitoring tool; the user should scan rows quickly.
 
 ## Components
 
-### HIG Push Button
-**Role:** Window chrome (Pin on Top, Hide, Preferences, About), dialog actions.
+### Tables and Lists
 
-Parchment `#fdfcfc` background, `#000000` text, 7px radius, `12px 16px` padding, 1px `#e5e5e5` border, `--shadow-hairline`. SF Pro Text 12px weight 400. Hover → `#f5f3f1`. Active/pressed → `--shadow-inset`. Focus → 2px `#000000` ring offset by 2px parchment.
+Use this table model for all telemetry lists:
 
-### Filled Ink Primary Button
-**Role:** Primary dialog action (OK, Save), affirmative single action.
+| Column | Width | Notes |
+| --- | --- | --- |
+| Icon | `24px` | SF Symbol-style, muted unless status needs emphasis |
+| Name | flexible | Primary sensor/fan label |
+| Value | `88px` to `120px` | Right-aligned mono text |
+| Detail | `120px` to `180px` | RPM range, source, mode, or last update |
+| Status | `72px` to `96px` | Text or compact dot plus label |
 
-`#000000` background, `#ffffff` text, 7px radius, 1px `#000000` border. SF Pro Text 12px weight 500. Hover → `#1a1a1a`. Disabled → Silver Mist bg + `#a59f97` text. Used sparingly — one primary per dialog.
+Rules:
 
-### HIG Segmented Control
-**Role:** Fan Auto/Custom mode toggle, preferences tray-mode toggle.
+- values use `--font-mono` and tabular numbers,
+- unavailable values render as muted `N/A`,
+- selected row uses `--color-selection-active` with white text,
+- group headers use muted 11px text and should not look like cards,
+- column separators use `--color-table-separator`.
 
-Container: `#f5f3f1` background, 6px radius, 1px `#e5e5e5` border, connected segments divided by 1px `#e5e5e5`. Inactive segment: transparent bg, `#000000` text. Active segment: `#000000` bg, `#ffffff` text, SF Pro Text 11–12px weight 500. The Auto/Custom fan toggle is a 2-segment control; the active mode is filled ink, the other is outlined.
+### Fan Controls
 
-### HIG Pop-up Button
-**Role:** Active preset selector.
+Fan control is global in FanGuard v1. One control applies to every detected fan together. The fan-control section must visually match the generated image: uppercase label, framed glass panel, mode row, target slider row, action buttons to the right, and info copy at the bottom.
 
-Parchment `#fdfcfc` background, `#000000` text, 7px radius, 1px `#e5e5e5` border, `--shadow-hairline`, SF Pro Text 12px weight 400, with a chevron glyph on the right. Opens a floating menu (see List Menu).
+Fan control mode must use a native segmented control:
 
-### List Menu (dropdown)
-**Role:** Preset list, pop-up menus.
+- `Auto`
+- `Manual`
 
-`#ffffff` elevated panel, 10px radius, `--shadow-elevated`, min-width matches trigger. Menu items: `8px 12px` padding, SF Pro Text 12px, hairline `#e5e5e5` dividers between groups. Hover/focus → `#f5f3f1` (no blue). Selected item → ink `Check` icon (lucide), label weight 500. Destructive (delete) → `X` icon in Driftwood, hover to Ember only if confirming a hot/unsafe preset. Never `bg-blue-500`.
+The selected segment uses accent blue or native selected material depending on context. Manual mode exposes one inline target RPM slider because the dashboard's primary job is fan control.
 
-### Edge-to-Edge List Pane
-**Role:** Fan table (left) and sensor list (right).
+Global manual control rules:
 
-Parchment `#fdfcfc` canvas. Column header row: `#f5f3f1` Warm Sand, SF Pro Text 11px weight 500 Driftwood, 1px `#e5e5e5` bottom border. Data rows separated by 1px `#e5e5e5` hairline `divide-y` (no zebra fill). Hover → `#efedea`. Values in SF Mono 12px tabular-nums. Panes divided by a 1px `#e5e5e5` vertical hairline. No outer rounded card — panes run edge-to-edge like Activity Monitor.
+- individual fan rows are telemetry only,
+- no per-fan sliders or custom modal,
+- the preview state is `Manual` with synced fan rows,
+- the shared safe range is `max(fan.min)` to `min(fan.max)`,
+- if the detected fans have no shared safe range, disable manual writes and explain why,
+- applying manual mode writes the same target RPM to every detected fan,
+- restoring auto restores every detected fan to automatic mode.
 
-### Status Dot
-**Role:** Sensor temperature state.
+RPM controls:
 
-6px circle. `< 85°C` → Driftwood `#777169` (monochrome). `≥ 85°C` → Ember `#ff4704` (the single safety signal). `null` → Silver Mist `#b1b0b0`. No green/yellow.
+- validate min and max boundaries before writes,
+- show minimum, maximum, requested target, and current average,
+- place the requested target above or visually tied to the slider thumb,
+- always show numeric RPM beside visual controls.
 
-### HIG Dialog Panel
-**Role:** FanControlModal, Preferences, About, Update.
+### Preset Control
 
-`#ffffff` Elevated surface, 10px radius, `--shadow-elevated`, `20px` padding, 1px `#e5e5e5` border. Title in SF Pro Text 13px weight 600 ink (or DM Sans 300 for large About headings). Body SF Pro Text 12–13px. Buttons right-aligned: Cancel = HIG Push Button, OK = Filled Ink Primary. Backdrop `rgba(0,0,0,0.18)`. No `shadow-2xl`.
+The active preset belongs in the toolbar. Use a native pop-up or pull-down button style. Preset choices should feel like system menu items, not large tiles.
 
-### Text Field
-**Role:** RPM input, preset name, temperature thresholds.
+Expected options:
 
-Parchment `#fdfcfc` (or `#ffffff` inside elevated dialogs) background, 5px radius, 1px `#e5e5e5` border, `4px 8px` padding, SF Pro Text 12px. Numeric inputs use SF Mono tabular-nums, right-aligned. Focus → 2px ink ring. Error → 1px Ember border + Ember helper text below.
+- Automatic
+- Quiet
+- Balanced
+- Performance
+- Custom presets when implemented
 
-### Temperature Range Bar
-**Role:** FanControlModal sensor-based config visualization.
+### Search Field
 
-Track: `#f5f3f1` Warm Sand, full width, 8px height, 4px radius. Range fill: `#000000` ink (monochrome — no green→yellow→red gradient). Live-current-temp marker: 12px ink circle with 2px parchment border, positioned along the track; turns **Ember `#ff4704`** only when the live reading is `≥ 85°C`. Labels in SF Mono 10px Driftwood.
+Use a native rounded search field with search icon, compact height, and placeholder text. Search filters visible rows only; it should not change polling or backend state.
 
-### Safety / Warning Callout
-**Role:** Extreme fan-setting warning, privilege/safety errors.
+### Buttons
 
-Warm Sand `#f5f3f1` background, 8px radius, 1px **Ember** border (the sanctioned safety use), SF Pro Text 11px ink text with a lucide `AlertTriangle` icon in Ember. No amber fill. This is the only place Ember is used as a border/fill accent.
+Buttons should match macOS controls:
 
----
+- push buttons for dialog actions,
+- toolbar icon buttons for compact commands,
+- bordered or material-backed controls for secondary actions,
+- destructive actions use system red only in confirmation contexts.
 
-## FanGuard Deviations from ElevenLabs Dogma
+Avoid custom pill styling. Radius should come from the control size and native material, not from a brand rule.
 
-These deviations are intentional and documented, in service of matching the Apple ecosystem and the safety needs of a fan-control utility:
+### Sheets and Dialogs
 
-1. **Ember `#ff4704` as a safety signal** — ElevenLabs reserves color for decorative orbs only. FanGuard reuses Ember exclusively for hot-temperature (≥85°C) indication (status dots, range-bar marker, warning callout border). It is never used for buttons, links, or hover states.
-2. **Decorative gradient orbs omitted** — The violet/orange ambient orbs are a voice-category marketing device; they have no place in a utility. Void Violet is retained as a token but unused in chrome.
-3. **HIG rectangular-rounded geometry instead of 9999px pills** — Buttons, pop-ups, and dialogs use macOS-native radii (5–10px). Capsules (9999px) appear only for small HIG badge contexts.
-4. **SF Pro Text + SF Mono instead of Inter + Geist Mono** — Apple's system fonts keep the app native to macOS. DM Sans weight 300 is retained for display headings to preserve the ElevenLabs "Waldenburg 300" headline personality.
-5. **Edge-to-edge hairline panes instead of floating rounded cards** — Matches Activity Monitor / System Settings information density.
-6. **Light-only** — The parchment system is a warm-light theme; dark mode is dropped for design coherence.
+Use sheets for workflows attached to the current window:
 
----
+- preferences,
+- update confirmation,
+- helper access explanation.
 
-## Do
+Use dialogs for app-level information:
 
-- Use HIG push-button geometry (7px) for window chrome and dialog actions; reserve Filled Ink for one primary action per dialog.
-- Use SF Mono with `tabular-nums` for every numeric metric (RPM, °C) so columns align.
-- Separate rows and panes with 1px `#e5e5e5` hairlines; let surface contrast (`#fdfcfc` / `#f5f3f1` / `#ffffff`) carry elevation.
-- Use the HIG segmented control for the Auto/Custom fan-mode toggle — active segment filled ink, inactive outlined.
-- Reserve Ember `#ff4704` strictly for hot (≥85°C) status dots, the range-bar live marker, and warning-callout borders.
-- Use lucide outlined icons at consistent stroke width, monochrome (Driftwood or Ink) — never multicolor.
-- Apply DM Sans 300 only to display-size headings (About title, large empty states); everything else is SF Pro Text / SF Mono.
+- About FanGuard,
+- critical safety warnings.
 
-## Don't
+Sheets should use `--material-sheet`, centered or attached to the parent window depending on implementation constraints in Tauri. Keep text short and controls native.
 
-- Never use Ember `#ff4704` or Void Violet `#0447ff` for button backgrounds, link colors, hover states, or any interactive affordance.
-- Never use green/yellow/red semantic status colors — temperature state is monochrome except the Ember hot signal.
-- Never apply soft-blur shadows (blur > 4px or opacity > 0.04) — elevation is hairlines and surface contrast.
-- Never use 9999px pill buttons as the default chrome — HIG rectangular-rounded geometry is the standard.
-- Never use DM Sans for body text, labels, buttons, or data — SF Pro Text / SF Mono handle all functional text.
-- Never add `dark:` variants or hardcoded dark hex values — the system is light-only.
-- Never use emojis in chrome — replace `⚠` / `✓` / `✕` with lucide `AlertTriangle` / `Check` / `X`.
+### Popovers and Menus
+
+Use popovers for compact contextual controls:
+
+- preset menu,
+- sensor source details,
+- menu bar display mode,
+- row actions.
+
+Popover content should be narrow, dense, and keyboard reachable.
+
+### Temperature Status
+
+Temperature status is the main allowed semantic color usage:
+
+| Status | Meaning | Color |
+| --- | --- | --- |
+| Normal | below warning threshold | `--color-status-normal` |
+| Warm | approaching warning threshold | `--color-status-warm` |
+| Hot | above safe threshold | `--color-status-hot` |
+| Unknown | unavailable or unsupported | `--color-status-unknown` |
+
+Use a small dot plus optional label. Do not flood table rows with colored backgrounds.
+
+### Menu Bar
+
+The menu bar icon remains a macOS template asset:
+
+- black source with alpha,
+- automatically adapts to light and dark menu bars,
+- supports compact telemetry text when enabled.
+
+Menu bar display modes:
+
+- fan RPM,
+- primary temperature,
+- icon only.
+
+Menu bar popover should reuse the same Liquid Glass material language as app popovers.
+
+## Implementation Notes
+
+### Svelte and Tailwind
+
+- Keep styling in Tailwind v4 utilities backed by CSS custom properties.
+- Use the shared `cn()` helper for dynamic classes.
+- Use Svelte 5 runes for state.
+- Prefer native-looking controls over hand-built decorative widgets.
+- Keep component boundaries aligned with product surfaces: `Window`, `Toolbar`, `FanControl`, `DataTable`, `Sheet`, `Popover`.
+
+### Tauri Window
+
+The Tauri window should support the native design direction:
+
+- transparent or translucent window where supported,
+- rounded corners,
+- hidden or integrated titlebar if the implementation can preserve drag regions and accessibility,
+- stable minimum dimensions for dense table scanning.
+
+Do not sacrifice accessibility or window behavior just to simulate glass. Native window semantics win when there is a tradeoff.
+
+### Accessibility
+
+- All controls need keyboard focus states.
+- Table rows need readable selected, hover, and inactive states.
+- Color cannot be the only indicator for temperature state.
+- Search and filter controls need accessible names.
+- Dialogs and sheets need focus trapping and escape/close behavior.
+
+### Performance
+
+Liquid Glass effects can be expensive in a webview. Apply blur to major surfaces only:
+
+- window,
+- toolbar,
+- sheets,
+- popovers.
+
+Do not apply backdrop blur to every row or cell. Data tables should stay visually crisp and cheap to render.
+
+## Do and Do Not
+
+### Do
+
+- Use SF Pro Text and SF Mono.
+- Use Liquid Glass materials for app-level surfaces.
+- Keep telemetry rows compact and table-based.
+- Use macOS blue for active selection.
+- Keep temperature colors small and semantic.
+- Preserve native controls, keyboard behavior, and system expectations.
+
+### Do Not
+
+- Build a marketing dashboard.
+- Use large hero typography.
+- Put every sensor in a separate decorative card.
+- Invent brand-specific button shapes.
+- Use decorative gradients as app surfaces.
+- Hide important fan or temperature data behind oversized controls.
+- Use blur effects inside dense tables.
+
+## Verification Checklist
+
+Use this checklist when implementing UI from this design document:
+
+- The app reads as a macOS utility at first glance.
+- The rendered dashboard visually matches the canonical generated image before alternate layout changes.
+- The toolbar, fan control, sheets, and popovers use Liquid Glass materials.
+- Main telemetry uses dense list/table structure.
+- Numeric columns align with SF Mono tabular numbers.
+- Active selection uses macOS blue.
+- Temperature status uses small semantic indicators.
+- All controls remain keyboard accessible.
+- Dark mode changes tokens, not component structure.
+- Performance remains smooth during sensor polling.

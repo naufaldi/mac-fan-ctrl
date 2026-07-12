@@ -8,6 +8,7 @@ import {
 	setPowerPresetConfig,
 } from "$lib/tauriCommands";
 import type { PowerPresetConfig, PowerSource, Preset } from "$lib/types";
+import { inputClass } from "$lib/ui";
 
 let config: PowerPresetConfig = $state({
 	enabled: false,
@@ -72,16 +73,18 @@ async function handleBatteryPreset(event: Event): Promise<void> {
 	}
 }
 
-const powerSourceLabel = $derived(
-	powerSource === "ac"
-		? "AC Power"
-		: powerSource === "battery"
-			? "Battery"
-			: "Unknown",
-);
+function formatPowerSource(source: PowerSource): string {
+	switch (source) {
+		case "ac":
+			return "AC Power";
+		case "battery":
+			return "Battery";
+		case "unknown":
+			return "Unknown";
+	}
+}
 
-const selectClass =
-	"w-full rounded-(--radius-input) border border-(--border-subtle) bg-(--surface-elevated) px-2 py-1 text-[12px] text-(--text-primary) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--focus-ring)";
+const powerSourceLabel = $derived(formatPowerSource(powerSource));
 </script>
 
 <div class={cn("flex flex-col gap-3")}>
@@ -92,12 +95,12 @@ const selectClass =
     <button
       type="button"
       class={cn(
-        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
-        config.enabled ? "bg-(--control-active-bg)" : "bg-(--color-silver-mist)"
+        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-1 focus-visible:ring-offset-(--focus-ring-offset)",
+        config.enabled ? "bg-(--text-primary)" : "bg-(--border-strong)"
       )}
       role="switch"
       aria-checked={config.enabled}
-      aria-label="Toggle auto-switch presets by power source"
+      aria-label="Auto-switch presets by power source"
       onclick={handleToggle}
     >
       <span
@@ -111,7 +114,7 @@ const selectClass =
 
   <div class={cn("flex items-center gap-2 text-[11px] text-(--text-secondary)")}>
     <span class={cn(
-      "inline-flex items-center gap-1 rounded-(--radius-capsule) border border-(--border-subtle) bg-(--surface-2) px-2 py-0.5 text-[10px] font-medium text-(--text-secondary)"
+      "inline-flex items-center gap-1 rounded-full border border-(--border-subtle) bg-(--surface-0) px-2 py-0.5 text-[10px] font-medium"
     )}>
       {powerSourceLabel}
     </span>
@@ -121,7 +124,7 @@ const selectClass =
     <div class={cn("flex flex-col gap-2")}>
       <label class={cn("flex flex-col gap-1")}>
         <span class={cn("text-[11px] text-(--text-secondary)")}>When on AC Power:</span>
-        <select class={cn(selectClass)} onchange={handleAcPreset} value={config.ac_preset ?? ""}>
+        <select class={cn(inputClass, "w-full")} onchange={handleAcPreset} value={config.ac_preset ?? ""}>
           <option value="">No change</option>
           {#each presets as preset}
             <option value={preset.name}>{preset.name}</option>
@@ -131,7 +134,7 @@ const selectClass =
 
       <label class={cn("flex flex-col gap-1")}>
         <span class={cn("text-[11px] text-(--text-secondary)")}>When on Battery:</span>
-        <select class={cn(selectClass)} onchange={handleBatteryPreset} value={config.battery_preset ?? ""}>
+        <select class={cn(inputClass, "w-full")} onchange={handleBatteryPreset} value={config.battery_preset ?? ""}>
           <option value="">No change</option>
           {#each presets as preset}
             <option value={preset.name}>{preset.name}</option>

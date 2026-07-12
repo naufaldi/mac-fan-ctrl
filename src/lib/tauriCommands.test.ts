@@ -6,7 +6,9 @@ import {
 	getPrivilegeStatus,
 	getSensors,
 	listenToSensorUpdates,
+	restoreAllFansAuto,
 	SENSOR_UPDATE_EVENT,
+	setAllFansConstantRpm,
 	setFanAuto,
 	setFanConstantRpm,
 } from "./tauriCommands";
@@ -61,7 +63,7 @@ describe("tauriCommands", () => {
 		let forwardedPayload: SensorData | null = null;
 		const unlisten = vi.fn();
 		mockedListen.mockImplementation(async (_event, callback) => {
-			callback({ payload: sampleSensors } as { payload: SensorData });
+			callback({ event: SENSOR_UPDATE_EVENT, id: 1, payload: sampleSensors });
 			return unlisten;
 		});
 
@@ -126,5 +128,24 @@ describe("tauriCommands", () => {
 			reason: "Fan control is disabled in TestFlight builds.",
 		});
 		expect(mockedInvoke).toHaveBeenCalledWith("get_privilege_status");
+	});
+
+	it("maps global fan control to one backend operation", async () => {
+		const mockedInvoke = vi.mocked(invoke);
+		mockedInvoke.mockClear();
+		mockedInvoke.mockResolvedValue(undefined);
+
+		await setAllFansConstantRpm(3200);
+		await restoreAllFansAuto();
+
+		expect(mockedInvoke).toHaveBeenNthCalledWith(
+			1,
+			"set_all_fans_constant_rpm",
+			{ rpm: 3200 },
+		);
+		expect(mockedInvoke).toHaveBeenNthCalledWith(
+			2,
+			"restore_all_fans_auto",
+		);
 	});
 });

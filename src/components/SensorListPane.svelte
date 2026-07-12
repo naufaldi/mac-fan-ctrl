@@ -1,155 +1,95 @@
 <script lang="ts">
-import {
-	Battery,
-	Cpu,
-	HardDrive,
-	Monitor,
-	Thermometer,
-	Wifi,
-} from "lucide-svelte";
+import { HardDrive, Thermometer } from "lucide-svelte";
 import { cn } from "$lib/cn";
-import {
-	getAllSensorsForDisplay,
-	getReadMoreLabel,
-	isPerCoreTemperatureUnavailable,
-	SUMMARY_SENSOR_LIMIT,
-	shouldShowReadMore,
-} from "$lib/sensorListPaneState";
-import type { Sensor, SensorData } from "$lib/types";
+import type { Sensor } from "$lib/types";
+import { telemetryGrid } from "$lib/ui";
 
 interface Props {
-	sensorData: SensorData | null;
+	sensors: Sensor[];
+	emptyLabel?: string;
 }
 
-let { sensorData }: Props = $props();
+const { sensors, emptyLabel = "No sensors available." }: Props = $props();
 
-const displaySensors = $derived(
-	sensorData ? getAllSensorsForDisplay(sensorData) : [],
-);
-const perCoreTemperatureUnavailable = $derived(
-	isPerCoreTemperatureUnavailable(sensorData),
-);
-const loading = $derived(!sensorData);
-let expanded: boolean = $state(false);
-const showReadMore = $derived(shouldShowReadMore(displaySensors.length));
-const visibleSensors = $derived(
-	!expanded && showReadMore
-		? displaySensors.slice(0, SUMMARY_SENSOR_LIMIT)
-		: displaySensors,
-);
-const cnClasses = (
-	...inputs: Array<string | undefined | null | false>
-): string => cn(...inputs);
-
-function getStatusColor(value: number | null): string {
-	if (value === null) return "text-(--text-muted)";
-	return "text-(--text-primary)";
+function statusDotClass(sensor: Sensor): string {
+	if (sensor.value === null) return "bg-(--status-unknown)";
+	if (sensor.sensor_type === "Storage") return "bg-(--status-normal)";
+	if (sensor.value > 85) return "bg-(--status-hot)";
+	if (sensor.value >= 60) return "bg-(--status-warm)";
+	return "bg-(--status-normal)";
 }
 
-function getStatusDotColor(value: number | null): string {
-	if (value === null) return "bg-(--color-silver-mist)";
-	if (value > 85) return "bg-(--color-ember-orange)";
-	return "bg-(--color-driftwood)";
+function statusLabel(sensor: Sensor): string {
+	if (sensor.value === null) return "N/A";
+	if (sensor.sensor_type === "Storage") return "OK";
+	if (sensor.value > 85) return "Hot";
+	if (sensor.value >= 60) return "Warm";
+	return "Normal";
+}
+
+function valueTextClass(value: number | null): string {
+	return value === null ? "text-(--text-muted)" : "text-(--text-value)";
 }
 
 function formatValue(sensor: Sensor): string {
-	if (sensor.name === "Disk Drives:") {
-		return "";
-	}
+	if (sensor.value === null) return "N/A";
+	return sensor.unit === "C"
+		? `${Math.round(sensor.value)} °C`
+		: `${Math.round(sensor.value)} ${sensor.unit}`;
+}
 
-	if (sensor.value === null) {
-		return "N/A";
-	}
-
-	return `${Math.round(sensor.value)}`;
+function formatRange(sensor: Sensor): string {
+	if (sensor.sensor_type === "Storage") return "20 - 70";
+	if (sensor.sensor_type === "Battery") return "20 - 45";
+	if (sensor.sensor_type === "Gpu") return "40 - 110";
+	return "40 - 100";
 }
 
 function getSensorIcon(name: string) {
 	const lowerName = name.toLowerCase();
-	if (name === "Disk Drives:") return null;
-	if (lowerName.includes("cpu")) return Cpu;
-	if (lowerName.includes("gpu")) return Monitor;
-	if (lowerName.includes("ram") || lowerName.includes("memory")) return Monitor; // Fallback since MemoryStick isn't always available, let's use Thermometer or something else
 	if (
 		lowerName.includes("ssd") ||
 		lowerName.includes("storage") ||
-		lowerName.includes("hdd")
+		lowerName.includes("hdd") ||
+		lowerName.includes("disk")
 	)
 		return HardDrive;
-	if (lowerName.includes("battery")) return Battery;
-	if (
-		lowerName.includes("airport") ||
-		lowerName.includes("wi-fi") ||
-		lowerName.includes("wifi")
-	)
-		return Wifi;
 	return Thermometer;
-}
-
-function getSensorIconColor(name: string) {
-	if (name === "Disk Drives:") return "text-(--text-muted)";
-	return "text-(--text-secondary)";
 }
 </script>
 
-<aside class={cnClasses("min-h-0 overflow-y-auto bg-(--surface-1)")} aria-label="Temperature sensors panel">
-  <!-- Header -->
-  <div
-    class={cnClasses("sticky top-0 grid grid-cols-[1fr_auto] items-center border-b border-(--border-subtle) bg-(--surface-2) text-[11px] font-medium text-(--text-secondary)")}
-    role="row"
-  >
-    <div class="px-2 py-1 flex items-center border-r border-(--border-subtle)">Sensor</div>
-    <div class="px-2 py-1 min-w-[70px] text-right">Value °C</div>
+{#if sensors.length === 0}
+  <div class={cn("px-4 py-3 text-[12px] text-(--text-muted)")}>
+    <span>{emptyLabel}</span>
   </div>
-
-  {#if loading}
-    <div class={cnClasses("px-2 py-2 text-(--text-muted)")}>
-      <span>Loading sensors...</span>
+{:else}
+  {#each sensors as sensor, i (sensor.key)}
+    {@const Icon = getSensorIcon(sensor.name)}
+    <div
+      class={cn(
+        "grid min-h-[30px] items-center border-b border-(--border-subtle) px-3 text-[12px] last:border-b-0",
+        telemetryGrid,
+        i % 2 === 1 && "bg-(--table-row-alternating)"
+      )}
+      role="row"
+    >
+      <div class={cn("flex min-w-0 items-center gap-3 pl-7 pr-3")}>
+        <Icon size={18} class={cn("shrink-0 text-(--text-secondary)")} strokeWidth={1.75} />
+        <span class={cn("truncate text-(--text-primary)")}>{sensor.name}</span>
+      </div>
+      <div class={cn("border-l border-(--table-column-separator) px-3 tabular-nums", valueTextClass(sensor.value))}>
+        {formatValue(sensor)}
+      </div>
+      <div class={cn("border-l border-(--table-column-separator) px-3 tabular-nums text-(--text-secondary)")}>
+        {formatRange(sensor)}
+      </div>
+      <div class={cn("border-l border-(--table-column-separator) px-3 text-(--text-secondary)")}>
+        -
+      </div>
+      <div class={cn("flex items-center gap-1.5 border-l border-(--table-column-separator) px-3 text-(--text-secondary)")}>
+        <span data-testid="status-dot" class={cn("inline-block size-1.5 shrink-0 rounded-full", statusDotClass(sensor))}></span>
+        {statusLabel(sensor)}
+      </div>
     </div>
-  {:else if displaySensors.length > 0}
-    <div class={cnClasses("flex flex-col")}>
-      {#if perCoreTemperatureUnavailable}
-        <div class={cnClasses("border-b border-(--border-subtle) bg-(--surface-2) px-2 py-1 text-[11px] text-(--text-muted)")}>
-          <span>Per-core temperature not exposed on this Mac</span>
-        </div>
-      {/if}
-      {#each visibleSensors as sensor (sensor.key)}
-        {@const Icon = getSensorIcon(sensor.name)}
-        <div
-          class={cnClasses(
-            "grid grid-cols-[1fr_auto] items-center border-b border-(--border-subtle) hover:bg-(--surface-hover) last:border-b-0"
-          )}
-          role="row"
-        >
-          <div class={cnClasses("flex items-center gap-2 truncate px-2 py-1 text-[12px]", sensor.name === "Disk Drives:" ? "text-(--text-muted) font-medium" : "text-(--text-primary)")}>
-            {#if Icon}
-              <Icon size={14} class={cnClasses("shrink-0", getSensorIconColor(sensor.name))} />
-            {/if}
-            <span class="truncate">{sensor.name}</span>
-          </div>
-          <div class={cnClasses("flex items-center justify-end gap-1.5 px-2 py-1 min-w-[70px] text-right text-[12px] font-mono [font-variant-numeric:tabular-nums]", getStatusColor(sensor.value))}>
-            {#if sensor.value !== null && sensor.name !== "Disk Drives:"}
-              <span class={cnClasses("inline-block size-1.5 shrink-0 rounded-full", getStatusDotColor(sensor.value))}></span>
-            {/if}
-            {formatValue(sensor)}
-          </div>
-        </div>
-      {/each}
-      {#if showReadMore}
-        <button
-          type="button"
-          class={cnClasses(
-            "w-full border-t border-(--border-subtle) bg-(--surface-2) px-2 py-1.5 text-[11px] text-(--text-muted) hover:text-(--text-secondary) hover:bg-(--surface-hover) cursor-pointer transition-colors"
-          )}
-          onclick={() => { expanded = !expanded; }}
-        >
-          {getReadMoreLabel(expanded, displaySensors.length)}
-        </button>
-      {/if}
-    </div>
-  {:else}
-    <div class={cnClasses("px-2 py-2 text-(--text-muted)")}>
-      <span>No sensors available.</span>
-    </div>
-  {/if}
-</aside>
+  {/each}
+{/if}

@@ -10,7 +10,6 @@ type CatalogRow = {
 };
 
 const TARGET_CATALOG: ReadonlyArray<CatalogRow> = [
-	{ key: "TB0T", name: "Battery", unit: "C", sensor_type: "Battery" },
 	{ key: "TCPUAVG", name: "CPU Core Average", unit: "C", sensor_type: "Cpu" },
 	{ key: "TP0b", name: "CPU Efficiency Cluster 1", unit: "C", sensor_type: "Cpu" },
 	{ key: "TP1b", name: "CPU Efficiency Cluster 2", unit: "C", sensor_type: "Cpu" },
@@ -18,14 +17,16 @@ const TARGET_CATALOG: ReadonlyArray<CatalogRow> = [
 	{ key: "TG0D", name: "GPU Cluster 1", unit: "C", sensor_type: "Gpu" },
 	{ key: "TG0P", name: "GPU Cluster 2", unit: "C", sensor_type: "Gpu" },
 	{ key: "TGAVG", name: "GPU Cluster Average", unit: "C", sensor_type: "Gpu" },
+	{ key: "TPCD", name: "Power Manager Die Average", unit: "C", sensor_type: "Power" },
+	{ key: "TB0T", name: "Battery", unit: "C", sensor_type: "Battery" },
 	{ key: "Tm0P", name: "Mainboard", unit: "C", sensor_type: "Other" },
 	{ key: "TM0P", name: "Memory Bank 1", unit: "C", sensor_type: "Memory" },
 	{ key: "TM1P", name: "Memory Bank 2", unit: "C", sensor_type: "Memory" },
-	{ key: "TPCD", name: "Power Manager Die Average", unit: "C", sensor_type: "Power" },
 	{ key: "PDTR", name: "Power Supply Proximity", unit: "W", sensor_type: "Power" },
 	{ key: "Ts0P", name: "Trackpad", unit: "C", sensor_type: "Trackpad" },
 	{ key: "DISK_SECTION", name: "Disk Drives:", unit: "C", sensor_type: "Storage" },
 	{ key: "TN0n", name: "APPLE SSD", unit: "C", sensor_type: "Storage" },
+	{ key: "TN1n", name: "SanDisk Extreme Pro", unit: "C", sensor_type: "Storage" },
 ];
 
 /** Sensor keys relevant for fan control decisions (heat sources, not peripherals). */
@@ -165,11 +166,11 @@ export function buildGpuAverageSensor(details: Sensor[]): Sensor {
 	return {
 		key: explicitAverage?.key ?? "TGAVG",
 		name: "GPU Cluster Average",
-		value: explicitAverage?.value ?? average(gpuValues),
+		value: explicitAverage?.value ?? (gpuValues.length > 1 ? average(gpuValues) : null),
 		unit: "C",
 		sensor_type: "Gpu",
 		source: explicitAverage?.source ?? "derived",
-		null_reason: gpuValues.length === 0 ? "unsupported" : null,
+		null_reason: gpuValues.length <= 1 ? "unsupported" : null,
 	};
 }
 
@@ -309,7 +310,9 @@ export function getAllSensorsForDisplay(sensorData: SensorData): Sensor[] {
 		return [byKey.get(row.key) ?? byName.get(row.name) ?? toPlaceholderSensor(row)];
 	});
 	return orderedCatalog.filter(
-		(s) => s.unit !== "W" && (s.source !== "placeholder" || s.sensor_type === "Storage"),
+		(s) =>
+			s.unit !== "W" &&
+			(s.key === "DISK_SECTION" || s.value !== null),
 	);
 }
 
@@ -317,4 +320,31 @@ export function isPerCoreTemperatureUnavailable(
 	sensorData: SensorData | null,
 ): boolean {
 	return sensorData?.diagnostics?.per_core_cpu_temp_available === false;
+}
+
+const DISK_SECTION_MARKER = "Disk Drives:";
+
+export type DisplaySensorPartitions = {
+	temperature: Sensor[];
+	disk: Sensor[];
+};
+
+/**
+ * Split the flat display list into the two disclosure groups used by the
+ * unified grouped layout. The "Disk Drives:" catalog row acts as the
+ * section marker between temperature sensors and disk rows.
+ */
+export function partitionDisplaySensors(
+	sensors: Sensor[],
+): DisplaySensorPartitions {
+	const markerIndex = sensors.findIndex(
+		(sensor) => sensor.name === DISK_SECTION_MARKER,
+	);
+	if (markerIndex === -1) {
+		return { temperature: sensors, disk: [] };
+	}
+	return {
+		temperature: sensors.slice(0, markerIndex),
+		disk: sensors.slice(markerIndex + 1),
+	};
 }

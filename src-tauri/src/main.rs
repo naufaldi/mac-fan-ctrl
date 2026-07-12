@@ -545,6 +545,7 @@ fn main() {
             ctrlc::set_handler(move || {
                 warn_log!("[fanguard] Signal received — restoring fans to Auto");
                 restore_fans(&signal_handle);
+				std::process::exit(0);
             })
             .unwrap_or_else(|e| {
                 warn_log!("[fanguard] Signal handler registration failed: {e}");
@@ -560,6 +561,8 @@ fn main() {
             commands::set_fan_constant_rpm,
             commands::set_fan_sensor_control,
             commands::set_fan_auto,
+			commands::set_all_fans_constant_rpm,
+			commands::restore_all_fans_auto,
             commands::get_fan_control_configs,
             commands::get_presets,
             commands::get_active_preset,

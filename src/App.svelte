@@ -1,10 +1,13 @@
 <script lang="ts">
-import { onMount } from "svelte";
+import type { Component } from "svelte";
 import { cn } from "$lib/cn";
 import type { SensorData as DesignTokenSensor } from "$lib/designTokens";
 import { getSensors, listenToSensorUpdates } from "$lib/tauriCommands";
 import type { FanData, SensorData } from "$lib/types";
-import DesktopDashboard from "./components/DesktopDashboard.svelte";
+
+const dashboardPromise: Promise<
+	Component<{ fans: DesignTokenSensor[]; sensorData: SensorData | null }>
+> = import("./components/DesktopDashboard.svelte").then((m) => m.default);
 
 type AppStatus =
 	| { readonly kind: "loading" }
@@ -16,7 +19,6 @@ let sensorData: SensorData | null = $state(null);
 let fans: DesignTokenSensor[] = $state([]);
 let unlisten: (() => void) | null = null;
 
-// Historical data buffer for sparklines (last 60 readings per fan)
 const SPARKLINE_BUFFER_SIZE = 60;
 const fanHistory: Map<number, number[]> = new Map();
 
@@ -52,10 +54,10 @@ function applyUpdate(data: SensorData): void {
 	appStatus = { kind: "ready" };
 }
 
-onMount(() => {
+$effect(() => {
 	let cancelled = false;
 
-	const init = async (): Promise<void> => {
+	const init = async () => {
 		try {
 			const initial = await getSensors();
 			if (!cancelled) applyUpdate(initial);
@@ -67,7 +69,7 @@ onMount(() => {
 
 		try {
 			unlisten = await listenToSensorUpdates((data) => {
-				applyUpdate(data);
+				if (!cancelled) applyUpdate(data);
 			});
 			if (cancelled && unlisten) {
 				unlisten();
@@ -87,91 +89,76 @@ onMount(() => {
 	};
 });
 
-const skeletonBarClass = "rounded bg-(--surface-2) animate-pulse";
-const skeletonRowClass = "flex gap-3 px-3";
+const barClass = "rounded-[8px] bg-(--surface-2) animate-pulse";
+const rowClass = "flex items-center gap-3 px-4";
 </script>
 
 {#if appStatus.kind === 'loading'}
-  <!-- Loading skeleton matching two-pane layout -->
-  <main class={cn("flex h-full w-full flex-col bg-(--surface-0)")}>
-    <!-- Header bar skeleton -->
-    <div class={cn("flex items-center justify-between border-b border-(--border-subtle) px-3 py-2")}>
-      <div class={cn(skeletonBarClass, "h-4 w-24")}></div>
-      <div class={cn("flex gap-2")}>
-        <div class={cn(skeletonBarClass, "h-5 w-20")}></div>
-        <div class={cn(skeletonBarClass, "h-5 w-20")}></div>
-      </div>
+  <main class={cn("flex h-full w-full flex-col bg-(--window-background)")}>
+    <div class={cn("flex min-h-14 items-center gap-3 border-b border-(--border-subtle) bg-(--material-toolbar) px-4")}>
+      <div class={cn(barClass, "h-3.5 w-20")}></div>
+      <div class={cn(barClass, "h-7 w-32")}></div>
+      <div class={cn("grow")}></div>
+      <div class={cn(barClass, "h-8 w-52")}></div>
+      <div class={cn(barClass, "h-8 w-8")}></div>
     </div>
 
-    <!-- Two-pane content skeleton -->
-    <div class={cn("flex flex-1 min-h-0")}>
-      <!-- Left pane (Fans) -->
-      <div class={cn("flex w-1/2 flex-col border-r border-(--border-subtle) bg-(--surface-1)")}>
-        <div class={cn("border-b border-(--border-subtle) px-3 py-1.5")}>
-          <div class={cn(skeletonBarClass, "h-3 w-12")}></div>
-        </div>
-        <div class={cn("flex flex-col gap-3 p-3")}>
-          <div class={cn(skeletonRowClass)}>
-            <div class={cn(skeletonBarClass, "h-3 w-32")}></div>
-            <div class={cn(skeletonBarClass, "h-3 w-16")}></div>
-          </div>
-          <div class={cn(skeletonRowClass)}>
-            <div class={cn(skeletonBarClass, "h-3 w-28")}></div>
-            <div class={cn(skeletonBarClass, "h-3 w-16")}></div>
-          </div>
-          <div class={cn(skeletonRowClass)}>
-            <div class={cn(skeletonBarClass, "h-3 w-36")}></div>
-            <div class={cn(skeletonBarClass, "h-3 w-16")}></div>
-          </div>
-        </div>
+    <div class={cn("border-b border-(--border-subtle) px-4 py-3")}>
+      <div class={cn("mb-2 flex items-center justify-between")}>
+        <div class={cn(barClass, "h-4 w-24")}></div>
+        <div class={cn(barClass, "h-7 w-36")}></div>
       </div>
-
-      <!-- Right pane (Sensors) -->
-      <div class={cn("flex w-1/2 flex-col bg-(--surface-1)")}>
-        <div class={cn("border-b border-(--border-subtle) px-3 py-1.5")}>
-          <div class={cn(skeletonBarClass, "h-3 w-16")}></div>
-        </div>
-        <div class={cn("flex flex-col gap-3 p-3")}>
-          <div class={cn(skeletonRowClass)}>
-            <div class={cn(skeletonBarClass, "h-3 w-40")}></div>
-            <div class={cn(skeletonBarClass, "h-3 w-12")}></div>
-          </div>
-          <div class={cn(skeletonRowClass)}>
-            <div class={cn(skeletonBarClass, "h-3 w-36")}></div>
-            <div class={cn(skeletonBarClass, "h-3 w-12")}></div>
-          </div>
-          <div class={cn(skeletonRowClass)}>
-            <div class={cn(skeletonBarClass, "h-3 w-44")}></div>
-            <div class={cn(skeletonBarClass, "h-3 w-12")}></div>
-          </div>
-          <div class={cn(skeletonRowClass)}>
-            <div class={cn(skeletonBarClass, "h-3 w-32")}></div>
-            <div class={cn(skeletonBarClass, "h-3 w-12")}></div>
-          </div>
-          <div class={cn(skeletonRowClass)}>
-            <div class={cn(skeletonBarClass, "h-3 w-38")}></div>
-            <div class={cn(skeletonBarClass, "h-3 w-12")}></div>
-          </div>
-        </div>
-      </div>
+      <div class={cn(barClass, "h-2 w-full")}></div>
     </div>
 
-    <!-- Footer skeleton -->
-    <div class={cn("flex items-center justify-between border-t border-(--border-subtle) px-3 py-1.5")}>
-      <div class={cn(skeletonBarClass, "h-3 w-32")}></div>
-      <div class={cn(skeletonBarClass, "h-3 w-20")}></div>
+    <div class={cn("flex min-h-0 grow flex-col bg-(--surface-1)")}>
+      <div class={cn("flex items-center justify-between border-b border-(--border-subtle) px-4 py-2.5")}>
+        <div class={cn(barClass, "h-3.5 w-24")}></div>
+        <div class={cn(barClass, "h-3 w-4")}></div>
+      </div>
+      {#each [0, 1] as r}
+        <div class={cn(rowClass, "py-2.5", r === 1 && "border-b border-(--border-subtle)")}>
+          <div class={cn(barClass, "h-3.5 w-32")}></div>
+          <div class={cn(barClass, "ml-auto h-3.5 w-28")}></div>
+          <div class={cn(barClass, "h-5 w-20 rounded-full")}></div>
+        </div>
+      {/each}
+      <div class={cn("flex items-center justify-between border-b border-(--border-subtle) px-4 py-2.5")}>
+        <div class={cn(barClass, "h-3.5 w-32")}></div>
+        <div class={cn(barClass, "h-3 w-4")}></div>
+      </div>
+      {#each [0, 1, 2] as r}
+        <div class={cn(rowClass, "py-1.5", r !== 2 && "border-b border-(--border-subtle)")}>
+          <div class={cn(barClass, "h-3 w-40")}></div>
+          <div class={cn(barClass, "ml-auto h-3 w-8")}></div>
+        </div>
+      {/each}
+    </div>
+
+    <div class={cn("mt-auto flex min-h-9 items-center gap-4 border-t border-(--border-subtle) bg-(--material-toolbar) px-4")}>
+      <div class={cn(barClass, "h-3 w-24")}></div>
+      <div class={cn("grow")}></div>
+      <div class={cn(barClass, "h-3 w-28")}></div>
     </div>
   </main>
 {:else if appStatus.kind === 'error'}
-  <!-- Error state -->
-  <main class={cn("flex h-full w-full items-center justify-center bg-(--surface-0)")}>
+  <main class={cn("flex h-full w-full items-center justify-center bg-(--window-background)")}>
     <div class={cn("flex flex-col items-center gap-1")}>
       <p class={cn("text-[12px] font-medium text-(--text-primary)")}>Failed to connect to sensor backend</p>
       <p class={cn("text-[11px] text-(--text-muted)")}>{appStatus.message}</p>
     </div>
   </main>
 {:else}
-  <main class={cn("flex h-full w-full")}>
-    <DesktopDashboard {fans} {sensorData} />
-  </main>
+  {#await dashboardPromise then DashboardComponent}
+    <main class={cn("flex h-full w-full bg-(--window-background)")}>
+      <DashboardComponent {fans} {sensorData} />
+    </main>
+  {:catch error}
+    <main class={cn("flex h-full w-full items-center justify-center bg-(--window-background)")}>
+      <div class={cn("flex flex-col items-center gap-1")}>
+        <p class={cn("text-[12px] font-medium text-(--text-primary)")}>Failed to load dashboard</p>
+        <p class={cn("text-[11px] text-(--text-muted)")}>{error instanceof Error ? error.message : String(error)}</p>
+      </div>
+    </main>
+  {/await}
 {/if}

@@ -8,7 +8,7 @@ export default defineConfig({
 		trace: "off",
 	},
 	webServer: {
-		command: "VITE_E2E_MOCK=true pnpm dev",
+		command: "VITE_E2E_MOCK=true ./node_modules/.bin/vite --port 1420 --strictPort",
 		url: "http://localhost:1420",
 		timeout: 120_000,
 		reuseExistingServer: !process.env.CI,

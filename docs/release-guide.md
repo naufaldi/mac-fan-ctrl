@@ -66,7 +66,7 @@ git push origin v0.1.0-beta.1
 The `release.yml` workflow triggers on any `v*` tag push. It:
 - Builds a universal macOS binary (Intel + Apple Silicon)
 - Imports the Developer ID certificate into a temporary CI keychain
-- Signs, notarizes, and staples the macOS app bundle
+- Signs, notarizes, staples, mounts, and verifies the final DMG through `scripts/tauri-release-build.sh`
 - Creates a draft GitHub Release with the `.dmg` attached
 - Generates `latest.json` for the auto-updater
 - Marks it as a prerelease (for beta tags)
@@ -74,7 +74,7 @@ The `release.yml` workflow triggers on any `v*` tag push. It:
 Local direct-distribution builds that need the helper should use:
 
 ```bash
-pnpm tauri:build:direct
+./scripts/build-local-notarized.sh
 ```
 
 ### 4. Publish the draft release

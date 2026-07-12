@@ -94,6 +94,14 @@ export async function setFanAuto(fanIndex: number): Promise<void> {
 	return invoke<void>("set_fan_auto", { fanIndex });
 }
 
+export async function setAllFansConstantRpm(rpm: number): Promise<void> {
+	return invoke<void>("set_all_fans_constant_rpm", { rpm });
+}
+
+export async function restoreAllFansAuto(): Promise<void> {
+	return invoke<void>("restore_all_fans_auto");
+}
+
 export async function getFanControlConfigs(): Promise<
 	Record<string, FanControlConfig>
 > {

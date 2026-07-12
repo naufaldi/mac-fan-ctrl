@@ -11,6 +11,13 @@ import {
 	setFanSensorControl,
 } from "$lib/tauriCommands";
 import type { FanControlConfig, FanData, Sensor } from "$lib/types";
+import {
+	backdropSurface,
+	buttonPrimary,
+	buttonSecondary,
+	inputClass,
+	sheetSurface,
+} from "$lib/ui";
 
 interface Props {
 	fan: FanData;
@@ -21,10 +28,7 @@ interface Props {
 
 const { fan, sensors, currentConfig, onclose }: Props = $props();
 
-// Filter to sensors relevant for fan control decisions
 const tempSensors = $derived(getFanControlSensors(sensors));
-
-// ── Modal state ──────────────────────────────────────────────────────────
 
 type ControlMode = "constant_rpm" | "sensor_based";
 
@@ -61,22 +65,16 @@ let isSubmitting: boolean = $state(false);
 let errorMessage: string = $state("");
 let extremeWarningAcknowledged: boolean = $state(false);
 
-// ── Element refs ─────────────────────────────────────────────────────────
-
 let dialogEl: HTMLDivElement | undefined = $state(undefined);
 let okButtonEl: HTMLButtonElement | undefined = $state(undefined);
 
-// Auto-focus OK button on mount
 $effect(() => {
 	okButtonEl?.focus();
 });
 
-// Clamp RPM to valid range
 const clampedRpm = $derived(
 	Math.max(fan.min, Math.min(fan.max, Math.round(constantRpm))),
 );
-
-// ── Temperature range bar state ──────────────────────────────────────────
 
 const selectedSensorValue = $derived(
 	tempSensors.find((s) => s.key === selectedSensorKey)?.value ?? null,
@@ -93,12 +91,6 @@ const rangeBarAriaLabel = $derived(
 		? `Fan speed range: minimum at ${tempLow}°C, maximum at ${tempHigh}°C. Current sensor temperature is ${selectedSensorValue}°C.`
 		: `Fan speed range: minimum at ${tempLow}°C, maximum at ${tempHigh}°C.`,
 );
-
-const isMarkerHot = $derived(
-	selectedSensorValue !== null && selectedSensorValue >= 85,
-);
-
-// ── Handlers ─────────────────────────────────────────────────────────────
 
 async function handleSubmit(): Promise<void> {
 	isSubmitting = true;
@@ -172,24 +164,6 @@ function handleKeydown(event: KeyboardEvent): void {
 	}
 }
 
-// ── Shared styles ────────────────────────────────────────────────────────
-
-const buttonBase =
-	"cursor-pointer rounded-(--radius-button) border px-4 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-1 focus-visible:ring-offset-(--focus-ring-offset)";
-const cancelButton = cn(
-	buttonBase,
-	"border-(--border-subtle) bg-(--surface-elevated) text-(--text-primary) shadow-(--shadow-hairline) hover:bg-(--surface-2)",
-);
-const okButton = cn(
-	buttonBase,
-	"border-(--control-active-border) bg-(--control-active-bg) text-(--control-active-text) disabled:opacity-50 disabled:cursor-not-allowed",
-);
-
-const inputBase =
-	"rounded-(--radius-input) border border-(--border-subtle) bg-(--surface-elevated) px-2 py-1 text-[12px] text-(--text-primary) font-mono [font-variant-numeric:tabular-nums] focus:outline-none focus:ring-2 focus:ring-(--focus-ring)";
-
-// ── Extreme settings detection ──────────────────────────────────────────
-
 const rpmRange = $derived(fan.max - fan.min);
 const isExtremeRpm = $derived(
 	selectedMode === "constant_rpm" &&
@@ -217,49 +191,41 @@ const extremeWarningMessage = $derived(
 
 <svelte:window onkeydown={handleKeydown} />
 
-<!-- Overlay wrapper -->
 <div
   class={cn('fixed inset-0 z-50 flex items-center justify-center')}
   transition:fade={{ duration: 150 }}
 >
-  <!-- Backdrop (accessible button, not in tab order) -->
   <button
     type="button"
-    class={cn('absolute inset-0 bg-black/20 backdrop-blur-[1px] cursor-default')}
+    class={cn(backdropSurface)}
     onclick={handleCancel}
     aria-label="Close dialog"
     tabindex="-1"
   ></button>
 
-  <!-- Modal -->
   <div
     bind:this={dialogEl}
-    class={cn(
-      'relative w-[420px] rounded-(--radius-dialog) border border-(--border-subtle) bg-(--surface-elevated) shadow-(--shadow-elevated)'
-    )}
+    class={cn(sheetSurface, 'relative w-[420px]')}
     role="dialog"
     aria-modal="true"
     aria-label={`Change fan control for ${fan.label}`}
     aria-describedby="fan-modal-body"
-    transition:scale={{ duration: 150, start: 0.95, opacity: 0 }}
+    transition:scale={{ duration: 150, start: 0.96, opacity: 0 }}
   >
-    <!-- Title -->
     <div class={cn('px-6 pt-5 pb-4 text-center')}>
-      <h2 class={cn('text-[13px] font-semibold text-(--text-primary)')}>
+      <h2 class={cn('text-[15px] font-semibold text-(--text-primary)')}>
         Change fan control for '{fan.label}'
       </h2>
     </div>
 
-    <!-- Body -->
     <div id="fan-modal-body" class={cn('px-6 pb-4 space-y-4')}>
-      <!-- Constant RPM option -->
       <label class={cn('flex items-center gap-3 cursor-pointer')}>
         <input
           type="radio"
           name="control-mode"
           value="constant_rpm"
           bind:group={selectedMode}
-          class="accent-(--color-midnight-ink)"
+          class="accent-(--text-primary)"
         />
         <span class={cn('text-[13px] text-(--text-primary)')}>Constant RPM value</span>
       </label>
@@ -273,7 +239,7 @@ const extremeWarningMessage = $derived(
             max={fan.max}
             step={100}
             aria-label={`Target RPM for ${fan.label}, range ${Math.round(fan.min)} to ${Math.round(fan.max)}`}
-            class={cn(inputBase, 'w-24 text-right')}
+            class={cn(inputClass, 'w-24 text-right')}
           />
           <span class={cn('text-[11px] text-(--text-muted)')}>
             RPM ({Math.round(fan.min)} – {Math.round(fan.max)})
@@ -281,17 +247,15 @@ const extremeWarningMessage = $derived(
         </div>
       {/if}
 
-      <!-- Separator -->
       <div class={cn('border-t border-(--border-subtle)')}></div>
 
-      <!-- Sensor-based option -->
       <label class={cn('flex items-center gap-3 cursor-pointer')}>
         <input
           type="radio"
           name="control-mode"
           value="sensor_based"
           bind:group={selectedMode}
-          class="accent-(--color-midnight-ink)"
+          class="accent-(--text-primary)"
         />
         <span class={cn('text-[13px] text-(--text-primary)')}>Sensor-based value</span>
 
@@ -299,7 +263,7 @@ const extremeWarningMessage = $derived(
           <select
             bind:value={selectedSensorKey}
             aria-label={`Temperature sensor for ${fan.label}`}
-            class={cn(inputBase, 'ml-auto min-w-[180px]')}
+            class={cn(inputClass, 'ml-auto min-w-[180px]')}
           >
             {#each tempSensors as sensor (sensor.key)}
               <option value={sensor.key}>{sensor.name}</option>
@@ -322,7 +286,7 @@ const extremeWarningMessage = $derived(
                 max={120}
                 step={1}
                 aria-label="Temperature to start increasing fan speed, degrees Celsius"
-                class={cn(inputBase, 'w-16 text-right')}
+                class={cn(inputClass, 'w-16 text-right')}
               />
               <span class={cn('text-[11px] text-(--text-muted)')}>°C</span>
             </div>
@@ -338,34 +302,31 @@ const extremeWarningMessage = $derived(
                 max={120}
                 step={1}
                 aria-label="Maximum temperature threshold, degrees Celsius"
-                class={cn(inputBase, 'w-16 text-right')}
+                class={cn(inputClass, 'w-16 text-right')}
               />
               <span class={cn('text-[11px] text-(--text-muted)')}>°C</span>
             </div>
           </div>
 
-          <!-- Temperature range bar -->
           <div class={cn('mt-1 space-y-1')} role="img" aria-label={rangeBarAriaLabel}>
-            <div class={cn('relative flex justify-between text-[10px] font-mono [font-variant-numeric:tabular-nums] text-(--text-muted)')}>
+            <div class={cn('relative flex justify-between font-mono text-[10px] tabular-nums text-(--text-muted)')}>
               <span>{tempLow}°C</span>
               {#if tempPosition !== null && selectedSensorValue !== null}
                 <span
-                  class={cn('absolute text-(--text-secondary) font-medium')}
+                  class={cn('absolute font-medium text-(--text-secondary)')}
                   style="left: {tempPosition * 100}%; transform: translateX(-50%)"
                 >{Math.round(selectedSensorValue)}°C</span>
               {/if}
               <span>{tempHigh}°C</span>
             </div>
-            <div class={cn('relative h-2 rounded-full overflow-hidden bg-(--surface-2)')}>
+            <div class={cn('relative h-2 rounded-full overflow-hidden bg-(--surface-0)')}>
               <div
-                class={cn('absolute inset-0 rounded-full bg-(--color-midnight-ink) opacity-20')}
+                class={cn('absolute inset-0 rounded-full')}
+                style="background: linear-gradient(to right, var(--status-normal), var(--status-warm), var(--status-hot))"
               ></div>
               {#if tempPosition !== null}
                 <div
-                  class={cn(
-                    'absolute top-1/2 w-3 h-3 rounded-full border-2 border-(--surface-elevated) shadow-sm',
-                    isMarkerHot ? 'bg-(--color-ember-orange)' : 'bg-(--text-primary)'
-                  )}
+                  class={cn('absolute top-1/2 size-3 rounded-full border-2 border-(--surface-2) bg-(--text-primary) shadow-sm')}
                   style="left: {tempPosition * 100}%; transform: translate(-50%, -50%)"
                 ></div>
               {/if}
@@ -378,34 +339,34 @@ const extremeWarningMessage = $derived(
         </div>
       {/if}
 
-      <!-- Extreme settings warning -->
       {#if hasExtremeSettings}
-        <div class={cn('rounded-(--radius-input) border border-(--color-ember-orange) bg-(--surface-2) p-3 space-y-2')} role="alert">
-          <p class={cn('flex items-start gap-2 text-[11px] text-(--text-primary) font-medium')}>
-            <AlertTriangle size={14} class="shrink-0 text-(--color-ember-orange) mt-0.5" aria-hidden="true" />
-            <span>{extremeWarningMessage}</span>
-          </p>
-          {#if !extremeWarningAcknowledged}
-            <label class={cn('flex items-center gap-2 cursor-pointer ml-5')}>
-              <input
-                type="checkbox"
-                bind:checked={extremeWarningAcknowledged}
-                class="accent-(--color-midnight-ink)"
-              />
-              <span class={cn('text-[11px] text-(--text-secondary)')}>I understand the risks</span>
-            </label>
-          {/if}
+        <div class={cn('flex items-start gap-2 rounded-[10px] border border-(--border-subtle) bg-(--surface-0) p-3 space-y-2')} role="alert">
+          <AlertTriangle size={14} class={cn('mt-0.5 shrink-0 text-(--text-primary)')} strokeWidth={1.75} />
+          <div class={cn('space-y-2')}>
+            <p class={cn('text-[11px] font-medium text-(--text-primary)')}>
+              {extremeWarningMessage}
+            </p>
+            {#if !extremeWarningAcknowledged}
+              <label class={cn('flex items-center gap-2 cursor-pointer')}>
+                <input
+                  type="checkbox"
+                  bind:checked={extremeWarningAcknowledged}
+                  class="accent-(--text-primary)"
+                />
+                <span class={cn('text-[11px] text-(--text-secondary)')}>I understand the risks</span>
+              </label>
+            {/if}
+          </div>
         </div>
       {/if}
 
-      <!-- Error message -->
       {#if errorMessage}
         <div
           class={cn('text-[11px] text-center space-y-2')}
           role="alert"
           aria-live="assertive"
         >
-          <p class={isPrivilegeError ? "text-(--color-ember-orange)" : "text-(--text-secondary)"}>
+          <p class={cn('text-(--text-primary)')}>
             {isPrivilegeError
               ? "Fan control needs a one-time setup after install. Grant access to install the privileged helper."
               : errorMessage}
@@ -413,7 +374,7 @@ const extremeWarningMessage = $derived(
           {#if isPrivilegeError}
             <button
               type="button"
-              class={okButton}
+              class={cn(buttonPrimary)}
               onclick={handleGrantAccess}
             >
               Grant Access
@@ -423,15 +384,14 @@ const extremeWarningMessage = $derived(
       {/if}
     </div>
 
-    <!-- Footer buttons -->
     <div class={cn('flex justify-end gap-2 px-6 pb-5')}>
-      <button type="button" class={cancelButton} onclick={handleCancel}>
+      <button type="button" class={cn(buttonSecondary)} onclick={handleCancel}>
         Cancel
       </button>
       <button
         type="button"
         bind:this={okButtonEl}
-        class={okButton}
+        class={cn(buttonPrimary)}
         disabled={isSubmitting || needsConfirmation}
         onclick={handleSubmit}
       >

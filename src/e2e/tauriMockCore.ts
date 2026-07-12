@@ -53,11 +53,34 @@ const baseSensorData = (state: E2eMockState): SensorData => ({
 			unit: "C",
 			sensor_type: "Cpu",
 		},
+		{
+			key: "TB0T",
+			name: "Battery",
+			value: 37,
+			unit: "C",
+			sensor_type: "Battery",
+			source: "smc",
+		},
+		{
+			key: "TG0D",
+			name: "GPU Cluster (AGX)",
+			value: 68,
+			unit: "C",
+			sensor_type: "Gpu",
+			source: "iohid_iokit",
+		},
 	],
+	diagnostics: {
+		model_id: "MacBookPro18,3",
+		diagnostics_enabled: false,
+		active_providers: ["smc", "iohid_iokit"],
+		unresolved: [],
+		per_core_cpu_temp_available: true,
+	},
 	fans: [
 		{
 			index: 0,
-			label: "Fan 0",
+			label: "System Fan 1",
 			actual: 2000,
 			min: state.fanState.min,
 			max: state.fanState.max,
@@ -65,6 +88,24 @@ const baseSensorData = (state: E2eMockState): SensorData => ({
 				state.fanState.mode === "forced"
 					? state.fanState.targetRpm
 					: state.fanState.min,
+			mode: state.fanState.mode,
+		},
+		{
+			index: 1,
+			label: "System Fan 2",
+			actual: 2200,
+			min: state.fanState.min,
+			max: state.fanState.max,
+			target: state.fanState.targetRpm,
+			mode: state.fanState.mode,
+		},
+		{
+			index: 2,
+			label: "System Fan 3",
+			actual: 2500,
+			min: state.fanState.min,
+			max: state.fanState.max,
+			target: state.fanState.targetRpm,
 			mode: state.fanState.mode,
 		},
 	],
@@ -116,6 +157,22 @@ export async function invoke<T>(
 			emitSensorUpdate(state);
 			return undefined as T;
 		}
+		case "set_all_fans_constant_rpm": {
+			const rpm = Number(args?.rpm ?? state.fanState.targetRpm);
+			state.fanState.mode = "forced";
+			state.fanState.targetRpm = Math.max(
+				state.fanState.min,
+				Math.min(state.fanState.max, Math.round(rpm)),
+			);
+			state.lastCommand = "set_all_fans_constant_rpm";
+			emitSensorUpdate(state);
+			return undefined as T;
+		}
+		case "restore_all_fans_auto":
+			state.fanState.mode = "auto";
+			state.lastCommand = "restore_all_fans_auto";
+			emitSensorUpdate(state);
+			return undefined as T;
 		case "get_alert_config":
 			return {
 				enabled: false,
@@ -125,7 +182,7 @@ export async function invoke<T>(
 		case "get_presets":
 			return [] as T;
 		case "get_active_preset":
-			return state.fanState.mode === "auto" ? "Automatic" : null;
+			return (state.fanState.mode === "auto" ? "Automatic" : null) as T;
 		case "get_power_preset_config":
 			return {
 				enabled: false,
@@ -162,6 +219,16 @@ export async function listen<T>(
 	return () => {
 		bucket.delete(wrapped);
 	};
+}
+
+export async function emit<T>(event: string, payload?: T): Promise<void> {
+	getMockState().listeners.get(event)?.forEach((handler) => {
+		handler({ payload } as { payload: SensorData });
+	});
+}
+
+export function isTauri(): boolean {
+	return true;
 }
 
 export type { FanControlConfig };
