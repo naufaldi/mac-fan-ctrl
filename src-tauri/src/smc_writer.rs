@@ -41,6 +41,8 @@ pub enum SmcWriteError {
     ModeTransitionTimedOut,
     #[error("Fan mode verification failed: mode {actual} still blocks target writes")]
     ModeVerificationFailed { actual: u8 },
+    #[error("Automatic mode verification failed: fan remained in mode {actual}")]
+    AutoModeVerificationFailed { actual: u8 },
     #[error("Fan control not available on this Mac: fan {fan_index} has no SMC mode key for safe manual control/restoration")]
     UnsupportedFanControl { fan_index: u8 },
     #[error("Fan target verification failed for fan {fan_index}: requested {requested:.0} RPM, read back {readback:.0} RPM")]
@@ -48,6 +50,13 @@ pub enum SmcWriteError {
         fan_index: u8,
         requested: f32,
         readback: f32,
+    },
+    #[error("Fan speed did not respond for fan {fan_index}: requested {requested:.0} RPM, actual stayed near {observed:.0} RPM (started at {initial:.0} RPM)")]
+    ActualRpmVerificationFailed {
+        fan_index: u8,
+        requested: f32,
+        initial: f32,
+        observed: f32,
     },
     #[error("Privileged helper is not running")]
     HelperNotRunning,
@@ -93,12 +102,8 @@ const FAN_MODE_MANUAL: u8 = 1;
 const FAN_MODE_SYSTEM: u8 = 3;
 const MODE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MODE_TRANSITION_RETRY_COUNT: u32 = 100;
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum FanModeCapability {
-    Managed,
-    Absent,
-}
+const ACTUAL_RPM_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const ACTUAL_RPM_VERIFY_ATTEMPTS: u8 = 20;
 
 #[link(name = "IOKit", kind = "framework")]
 extern "C" {
@@ -285,7 +290,7 @@ impl SmcWriter {
                         .to_string(),
                 );
                 lines.push(
-                    "  -> Safe manual fan control requires F*Md mode keys; absent mode keys are rejected"
+                    "  -> Direct mode control may still be available through F*Md or F*md"
                         .to_string(),
                 );
             }
@@ -305,22 +310,32 @@ impl SmcWriter {
                         lines.push(format!("--- Fan {i} ---"));
 
                         // Mode
-                        let md_key = fan_key(i, b"Md");
-                        match self.read_key_info(md_key) {
-                            Ok(md_info) => match self.read_key_bytes(md_key, md_info.data_size) {
-                                Ok(md_val) => {
-                                    let mode = md_val.first().copied().unwrap_or(255);
-                                    let mode_name = match mode {
-                                        0 => "Auto",
-                                        1 => "Forced/Manual",
-                                        3 => "System (thermalmonitord enforced)",
-                                        _ => "Unknown",
-                                    };
-                                    lines.push(format!("  F{i}Md (mode): {mode} = {mode_name}"));
-                                }
-                                Err(e) => lines.push(format!("  F{i}Md read error: {e}")),
+                        match self.resolve_fan_mode_key(i) {
+                            Ok(md_key) => match self.read_key_info(md_key) {
+                                Ok(md_info) => match self.read_key_bytes(md_key, md_info.data_size)
+                                {
+                                    Ok(md_val) => {
+                                        let mode = md_val.first().copied().unwrap_or(255);
+                                        let mode_name = match mode {
+                                            0 => "Auto",
+                                            1 => "Forced/Manual",
+                                            3 => "System (thermalmonitord enforced)",
+                                            _ => "Unknown",
+                                        };
+                                        lines.push(format!(
+                                            "  {} (mode): {mode} = {mode_name}",
+                                            key_to_string(md_key)
+                                        ));
+                                    }
+                                    Err(e) => lines.push(format!(
+                                        "  {} read error: {e}",
+                                        key_to_string(md_key)
+                                    )),
+                                },
+                                Err(e) => lines
+                                    .push(format!("  {} key error: {e}", key_to_string(md_key))),
                             },
-                            Err(e) => lines.push(format!("  F{i}Md key error: {e}")),
+                            Err(e) => lines.push(format!("  fan mode key error: {e}")),
                         }
 
                         // Actual RPM
@@ -487,6 +502,8 @@ impl SmcWriter {
             });
         }
 
+        let initial_actual_rpm = self.read_fan_rpm(fan_index, b"Ac")?;
+
         // Step 1: Unlock thermal enforcement (best-effort — key may not exist on M1)
         match self.unlock_fan_control_impl() {
             Ok(()) => debug_log!("[smc_writer] Ftst unlock OK"),
@@ -498,19 +515,13 @@ impl SmcWriter {
             }
         }
 
-        let mode_capability =
-            detect_fan_mode_capability(self.read_key_info(fan_key(fan_index, b"Md")))?;
+        let mode_key = self.resolve_fan_mode_key(fan_index)?;
+        self.wait_for_system_mode_handoff(mode_key)?;
 
-        if mode_capability == FanModeCapability::Managed {
-            self.wait_for_system_mode_handoff(fan_index)?;
-
-            // Step 2: Set forced mode
-            debug_log!("[smc_writer] Setting F{fan_index}Md=1 (forced)");
-            self.set_fan_mode(fan_index, true)?;
-            self.verify_mode_allows_target_write(fan_index)?;
-        } else {
-            return require_restorable_fan_mode(mode_capability, fan_index);
-        }
+        // Step 2: Set forced mode
+        debug_log!("[smc_writer] Setting fan {fan_index} mode=1 (forced)");
+        self.set_fan_mode(mode_key, true)?;
+        self.verify_mode_allows_target_write(mode_key)?;
 
         // Step 3: Write target RPM
         let key = fan_key(fan_index, b"Tg");
@@ -550,10 +561,12 @@ impl SmcWriter {
                         }
                     } else {
                         debug_log!("[smc_writer] F{fan_index}Tg verified: {readback_rpm:.0} RPM");
-                        debug_log!(
-                            "[smc_writer] set_fan_target_rpm: done fan={fan_index} rpm={rpm}"
+                        return self.verify_actual_rpm_response(
+                            fan_index,
+                            initial_actual_rpm,
+                            rpm,
+                            ACTUAL_RPM_VERIFY_ATTEMPTS,
                         );
-                        return Ok(());
                     }
                 }
                 Err(e) => debug_log!(
@@ -580,38 +593,33 @@ impl SmcWriter {
     /// no fans remain in forced mode.
     fn set_fan_auto_impl(&self, fan_index: u8) -> Result<(), SmcWriteError> {
         debug_log!("[smc_writer] set_fan_auto: fan={fan_index}");
-        let mode_capability =
-            detect_fan_mode_capability(self.read_key_info(fan_key(fan_index, b"Md")))?;
-
-        if mode_capability == FanModeCapability::Managed {
-            self.set_fan_mode(fan_index, false)
-        } else {
-            require_restorable_fan_mode(mode_capability, fan_index)
-        }
+        let mode_key = self.resolve_fan_mode_key(fan_index)?;
+        self.set_fan_mode(mode_key, false)?;
+        std::thread::sleep(MODE_POLL_INTERVAL);
+        validate_auto_mode_restored(self.read_fan_mode(mode_key)?)
     }
 
     /// Sets the fan mode flag: `false` = Auto, `true` = Forced.
-    fn set_fan_mode(&self, fan_index: u8, forced: bool) -> Result<(), SmcWriteError> {
-        let key = fan_key(fan_index, b"Md");
-        let key_info = self.read_key_info(key)?;
+    fn set_fan_mode(&self, mode_key: u32, forced: bool) -> Result<(), SmcWriteError> {
+        let key_info = self.read_key_info(mode_key)?;
         let value: u8 = if forced {
             FAN_MODE_MANUAL
         } else {
             FAN_MODE_AUTO
         };
-        self.write_key_bytes(key, key_info.data_size, &[value])
+        self.write_key_bytes(mode_key, key_info.data_size, &[value])
     }
 
-    fn wait_for_system_mode_handoff(&self, fan_index: u8) -> Result<(), SmcWriteError> {
-        debug_log!("[smc_writer] wait_for_system_mode_handoff: fan={fan_index} — polling mode (max {MODE_TRANSITION_RETRY_COUNT} x {}ms)...",
+    fn wait_for_system_mode_handoff(&self, mode_key: u32) -> Result<(), SmcWriteError> {
+        debug_log!("[smc_writer] wait_for_system_mode_handoff: polling mode (max {MODE_TRANSITION_RETRY_COUNT} x {}ms)...",
             MODE_POLL_INTERVAL.as_millis());
-        let initial_mode = self.read_fan_mode(fan_index)?;
+        let initial_mode = self.read_fan_mode(mode_key)?;
         debug_log!("[smc_writer] wait_for_system_mode_handoff: initial mode={initial_mode} (0=Auto, 1=Forced, 3=System)");
 
         let mut poll_count: u32 = 0;
         let result = wait_for_system_mode_handoff(
             || {
-                let mode = self.read_fan_mode(fan_index)?;
+                let mode = self.read_fan_mode(mode_key)?;
                 poll_count += 1;
                 if poll_count <= 5 || poll_count % 20 == 0 {
                     debug_log!(
@@ -625,7 +633,7 @@ impl SmcWriter {
 
         match &result {
             Ok(()) => {
-                match self.read_fan_mode(fan_index) {
+                match self.read_fan_mode(mode_key) {
                     Ok(final_mode) => debug_log!("[smc_writer] wait_for_system_mode_handoff: OK after {poll_count} polls, final mode={final_mode}"),
                     Err(e) => debug_log!("[smc_writer] wait_for_system_mode_handoff: OK after {poll_count} polls, but mode readback failed: {e}"),
                 }
@@ -635,20 +643,64 @@ impl SmcWriter {
         result
     }
 
-    fn read_fan_mode(&self, fan_index: u8) -> Result<u8, SmcWriteError> {
-        let key = fan_key(fan_index, b"Md");
-        let key_info = self.read_key_info(key)?;
-        let bytes = self.read_key_bytes(key, key_info.data_size)?;
+    fn read_fan_mode(&self, mode_key: u32) -> Result<u8, SmcWriteError> {
+        let key_info = self.read_key_info(mode_key)?;
+        let bytes = self.read_key_bytes(mode_key, key_info.data_size)?;
         bytes
             .first()
             .copied()
-            .ok_or(SmcWriteError::InvalidFanId(fan_index))
+            .ok_or(SmcWriteError::UnknownKey(key_to_string(mode_key)))
     }
 
-    fn verify_mode_allows_target_write(&self, fan_index: u8) -> Result<(), SmcWriteError> {
-        let actual_mode = self.read_fan_mode(fan_index)?;
-        debug_log!("[smc_writer] verify_mode: fan={fan_index} actual_mode={actual_mode} (need 0 or 1, reject 3)");
+    fn read_fan_rpm(&self, fan_index: u8, suffix: &[u8; 2]) -> Result<f32, SmcWriteError> {
+        let key = fan_key(fan_index, suffix);
+        let key_info = self.read_key_info(key)?;
+        let type_bytes = key_info.data_type.to_be_bytes();
+        self.read_key_bytes(key, key_info.data_size)
+            .map(|bytes| decode_rpm(&bytes, &type_bytes))
+    }
+
+    fn verify_actual_rpm_response(
+        &self,
+        fan_index: u8,
+        initial: f32,
+        requested: f32,
+        attempts_remaining: u8,
+    ) -> Result<(), SmcWriteError> {
+        let observed = self.read_fan_rpm(fan_index, b"Ac")?;
+        match validate_actual_rpm_response(fan_index, initial, requested, observed) {
+            Ok(()) => {
+                debug_log!("[smc_writer] F{fan_index}Ac responded: initial={initial:.0} observed={observed:.0} requested={requested:.0}");
+                Ok(())
+            }
+            Err(_) if attempts_remaining > 1 => {
+                std::thread::sleep(ACTUAL_RPM_POLL_INTERVAL);
+                self.verify_actual_rpm_response(
+                    fan_index,
+                    initial,
+                    requested,
+                    attempts_remaining - 1,
+                )
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn verify_mode_allows_target_write(&self, mode_key: u32) -> Result<(), SmcWriteError> {
+        let actual_mode = self.read_fan_mode(mode_key)?;
+        debug_log!("[smc_writer] verify_mode: actual_mode={actual_mode} (require 1)");
         validate_mode_allows_target_write(actual_mode)
+    }
+
+    fn resolve_fan_mode_key(&self, fan_index: u8) -> Result<u32, SmcWriteError> {
+        let uppercase_key = fan_key(fan_index, b"Md");
+        let lowercase_key = fan_key(fan_index, b"md");
+        let uppercase = self.read_key_info(uppercase_key);
+        let lowercase = match &uppercase {
+            Err(SmcWriteError::UnknownKey(_)) => self.read_key_info(lowercase_key),
+            _ => Err(SmcWriteError::UnknownKey(key_to_string(lowercase_key))),
+        };
+        select_fan_mode_key(fan_index, uppercase, lowercase)
     }
 
     // ── Low-level SMC operations ─────────────────────────────────────────
@@ -801,6 +853,10 @@ fn fan_key(fan_index: u8, suffix: &[u8; 2]) -> u32 {
     u32::from_be_bytes([b'F', b'0' + fan_index, suffix[0], suffix[1]])
 }
 
+fn key_to_string(key: u32) -> String {
+    String::from_utf8_lossy(&key.to_be_bytes()).into_owned()
+}
+
 /// Encodes a float value into the SMC byte format for the given data type.
 fn encode_value(value: f32, data_type: u32, data_size: u32) -> Result<Vec<u8>, SmcWriteError> {
     let type_bytes = data_type.to_be_bytes();
@@ -879,30 +935,34 @@ where
 
 fn validate_mode_allows_target_write(actual_mode: u8) -> Result<(), SmcWriteError> {
     match actual_mode {
-        FAN_MODE_AUTO | FAN_MODE_MANUAL => Ok(()),
+        FAN_MODE_MANUAL => Ok(()),
         _ => Err(SmcWriteError::ModeVerificationFailed {
             actual: actual_mode,
         }),
     }
 }
 
-fn detect_fan_mode_capability(
-    mode_key_info: Result<SmcKeyDataKeyInfo, SmcWriteError>,
-) -> Result<FanModeCapability, SmcWriteError> {
-    match mode_key_info {
-        Ok(_) => Ok(FanModeCapability::Managed),
-        Err(SmcWriteError::UnknownKey(_)) => Ok(FanModeCapability::Absent),
-        Err(error) => Err(error),
+fn validate_auto_mode_restored(actual_mode: u8) -> Result<(), SmcWriteError> {
+    match actual_mode {
+        FAN_MODE_AUTO | FAN_MODE_SYSTEM => Ok(()),
+        _ => Err(SmcWriteError::AutoModeVerificationFailed {
+            actual: actual_mode,
+        }),
     }
 }
 
-fn require_restorable_fan_mode(
-    mode_capability: FanModeCapability,
+fn select_fan_mode_key(
     fan_index: u8,
-) -> Result<(), SmcWriteError> {
-    match mode_capability {
-        FanModeCapability::Managed => Ok(()),
-        FanModeCapability::Absent => Err(SmcWriteError::UnsupportedFanControl { fan_index }),
+    uppercase: Result<SmcKeyDataKeyInfo, SmcWriteError>,
+    lowercase: Result<SmcKeyDataKeyInfo, SmcWriteError>,
+) -> Result<u32, SmcWriteError> {
+    match (uppercase, lowercase) {
+        (Ok(_), _) => Ok(fan_key(fan_index, b"Md")),
+        (Err(SmcWriteError::UnknownKey(_)), Ok(_)) => Ok(fan_key(fan_index, b"md")),
+        (Err(SmcWriteError::UnknownKey(_)), Err(SmcWriteError::UnknownKey(_))) => {
+            Err(SmcWriteError::UnsupportedFanControl { fan_index })
+        }
+        (Err(error), _) => Err(error),
     }
 }
 
@@ -921,6 +981,34 @@ fn validate_target_readback(
         fan_index,
         requested,
         readback,
+    })
+}
+
+fn validate_actual_rpm_response(
+    fan_index: u8,
+    initial: f32,
+    requested: f32,
+    observed: f32,
+) -> Result<(), SmcWriteError> {
+    const TARGET_TOLERANCE_RPM: f32 = 150.0;
+    const MIN_PROGRESS_RPM: f32 = 100.0;
+    const MAX_REQUIRED_PROGRESS_RPM: f32 = 300.0;
+
+    let distance = (requested - initial).abs();
+    let direction = (requested - initial).signum();
+    let progress = (observed - initial) * direction;
+    let required_progress = (distance * 0.15).clamp(MIN_PROGRESS_RPM, MAX_REQUIRED_PROGRESS_RPM);
+    let target_reached = (observed - requested).abs() <= TARGET_TOLERANCE_RPM;
+
+    if target_reached || progress >= required_progress {
+        return Ok(());
+    }
+
+    Err(SmcWriteError::ActualRpmVerificationFailed {
+        fan_index,
+        requested,
+        initial,
+        observed,
     })
 }
 
@@ -1088,10 +1176,15 @@ mod tests {
     }
 
     #[test]
-    fn validate_mode_allows_target_write_accepts_auto_readback() {
+    fn validate_mode_allows_target_write_rejects_auto_readback() {
         let result = validate_mode_allows_target_write(FAN_MODE_AUTO);
 
-        assert!(result.is_ok());
+        assert!(matches!(
+            result,
+            Err(SmcWriteError::ModeVerificationFailed {
+                actual: FAN_MODE_AUTO
+            })
+        ));
     }
 
     #[test]
@@ -1114,29 +1207,50 @@ mod tests {
     }
 
     #[test]
-    fn detect_fan_mode_capability_uses_mode_control_when_key_exists() {
-        let result = detect_fan_mode_capability(Ok(SmcKeyDataKeyInfo::default()));
-
-        assert!(matches!(result, Ok(FanModeCapability::Managed)));
+    fn validate_auto_mode_restored_accepts_auto_and_system_reclaim() {
+        assert!(validate_auto_mode_restored(FAN_MODE_AUTO).is_ok());
+        assert!(validate_auto_mode_restored(FAN_MODE_SYSTEM).is_ok());
     }
 
     #[test]
-    fn detect_fan_mode_capability_skips_mode_control_when_key_is_missing() {
-        let result = detect_fan_mode_capability(Err(SmcWriteError::UnknownKey("F0Md".to_string())));
-
-        assert!(matches!(result, Ok(FanModeCapability::Absent)));
+    fn validate_auto_mode_restored_rejects_manual_mode() {
+        assert!(matches!(
+            validate_auto_mode_restored(FAN_MODE_MANUAL),
+            Err(SmcWriteError::AutoModeVerificationFailed {
+                actual: FAN_MODE_MANUAL
+            })
+        ));
     }
 
     #[test]
-    fn detect_fan_mode_capability_propagates_non_missing_errors() {
-        let result = detect_fan_mode_capability(Err(SmcWriteError::InsufficientPrivileges));
+    fn select_fan_mode_key_prefers_uppercase_mode_key() {
+        let result = select_fan_mode_key(
+            0,
+            Ok(SmcKeyDataKeyInfo::default()),
+            Err(SmcWriteError::UnknownKey("F0md".to_string())),
+        );
 
-        assert!(matches!(result, Err(SmcWriteError::InsufficientPrivileges)));
+        assert_eq!(result.unwrap(), fan_key(0, b"Md"));
     }
 
     #[test]
-    fn require_restorable_fan_mode_rejects_absent_mode_key() {
-        let result = require_restorable_fan_mode(FanModeCapability::Absent, 0);
+    fn select_fan_mode_key_falls_back_to_lowercase_mode_key() {
+        let result = select_fan_mode_key(
+            0,
+            Err(SmcWriteError::UnknownKey("F0Md".to_string())),
+            Ok(SmcKeyDataKeyInfo::default()),
+        );
+
+        assert_eq!(result.unwrap(), fan_key(0, b"md"));
+    }
+
+    #[test]
+    fn select_fan_mode_key_rejects_fans_without_either_mode_key() {
+        let result = select_fan_mode_key(
+            0,
+            Err(SmcWriteError::UnknownKey("F0Md".to_string())),
+            Err(SmcWriteError::UnknownKey("F0md".to_string())),
+        );
 
         assert!(matches!(
             result,
@@ -1159,50 +1273,31 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "hardware-dependent smoke test for Apple Silicon Macs without F*Md"]
-    fn writes_target_rpm_when_mode_key_is_missing() {
-        let writer = SmcWriter::new().expect("SMC writer should connect on supported Macs");
-        let fan_index = 0;
-        let mode_capability =
-            detect_fan_mode_capability(writer.read_key_info(fan_key(fan_index, b"Md")));
-
-        if !matches!(mode_capability, Ok(FanModeCapability::Absent)) {
-            return;
-        }
-
-        let target_info = writer
-            .read_key_info(fan_key(fan_index, b"Tg"))
-            .expect("target key should exist");
-        let target_type = target_info.data_type.to_be_bytes();
-        let target_bytes = writer
-            .read_key_bytes(fan_key(fan_index, b"Tg"), target_info.data_size)
-            .expect("target value should be readable");
-        let current_target = decode_rpm(&target_bytes, &target_type);
-
-        let min_info = writer
-            .read_key_info(fan_key(fan_index, b"Mn"))
-            .expect("min key should exist");
-        let min_type = min_info.data_type.to_be_bytes();
-        let min_bytes = writer
-            .read_key_bytes(fan_key(fan_index, b"Mn"), min_info.data_size)
-            .expect("min value should be readable");
-        let min_rpm = decode_rpm(&min_bytes, &min_type);
-
-        let max_info = writer
-            .read_key_info(fan_key(fan_index, b"Mx"))
-            .expect("max key should exist");
-        let max_type = max_info.data_type.to_be_bytes();
-        let max_bytes = writer
-            .read_key_bytes(fan_key(fan_index, b"Mx"), max_info.data_size)
-            .expect("max value should be readable");
-        let max_rpm = decode_rpm(&max_bytes, &max_type);
-        let safe_target = current_target.clamp(min_rpm, max_rpm);
-
-        let result = writer.set_fan_target_rpm_impl(fan_index, safe_target, min_rpm, max_rpm);
+    fn validate_actual_rpm_response_rejects_a_stationary_fan() {
+        let result = validate_actual_rpm_response(0, 2494.0, 3917.0, 2501.0);
 
         assert!(matches!(
             result,
-            Err(SmcWriteError::UnsupportedFanControl { fan_index: 0 })
+            Err(SmcWriteError::ActualRpmVerificationFailed {
+                fan_index: 0,
+                requested: 3917.0,
+                initial: 2494.0,
+                observed: 2501.0,
+            })
         ));
+    }
+
+    #[test]
+    fn validate_actual_rpm_response_accepts_directional_spin_up() {
+        let result = validate_actual_rpm_response(0, 2494.0, 3917.0, 2750.0);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_actual_rpm_response_accepts_a_target_already_reached() {
+        let result = validate_actual_rpm_response(0, 3850.0, 3917.0, 3860.0);
+
+        assert!(result.is_ok());
     }
 }

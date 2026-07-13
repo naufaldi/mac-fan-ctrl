@@ -1,5 +1,4 @@
 import "./app.css";
-import { isTauri } from "@tauri-apps/api/core";
 import { mount } from "svelte";
 import App from "./App.svelte";
 
@@ -12,7 +11,7 @@ if (!appRoot) {
 // Browser-only dev preview: install a Tauri IPC mock so the dashboard renders
 // with sample data outside the native webview. Tree-shaken out of production
 // builds (import.meta.env.DEV is statically false) and skipped inside Tauri.
-if (import.meta.env.DEV && !isTauri()) {
+if (import.meta.env.DEV && import.meta.env.VITE_FANGUARD_NATIVE !== "1") {
   void (async () => {
     const { installDevMock } = await import("./lib/devMock");
     installDevMock();

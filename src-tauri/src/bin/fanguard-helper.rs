@@ -6,7 +6,9 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use fanguard_lib::smc_protocol::{HelperRequest, HelperResponse, SOCKET_PATH};
+use fanguard_lib::smc_protocol::{
+    HelperRequest, HelperResponse, HELPER_PROTOCOL_VERSION, SOCKET_PATH,
+};
 use fanguard_lib::smc_writer::{SmcWriteApi, SmcWriter};
 
 const HELPER_SOCKET_MODE: u32 = 0o660;
@@ -169,6 +171,9 @@ fn dispatch_request(request: HelperRequest, writer: &Mutex<SmcWriter>) -> Helper
     };
 
     match request {
+        HelperRequest::GetProtocolVersion => HelperResponse::ProtocolVersion {
+            version: HELPER_PROTOCOL_VERSION,
+        },
         HelperRequest::Ping => HelperResponse::Pong,
         HelperRequest::SetFanTargetRpm {
             fan_index,

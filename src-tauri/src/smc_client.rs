@@ -1,13 +1,16 @@
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::time::Duration;
 
-use crate::smc_protocol::{HelperRequest, HelperResponse, SOCKET_PATH};
+use crate::smc_protocol::{HelperRequest, HelperResponse, HELPER_PROTOCOL_VERSION, SOCKET_PATH};
 use crate::smc_writer::{SmcWriteApi, SmcWriteError};
 
 pub struct SmcSocketClient {
     socket_path: PathBuf,
 }
+
+const HELPER_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 impl SmcSocketClient {
     pub fn new() -> Result<Self, SmcWriteError> {
@@ -19,17 +22,24 @@ impl SmcSocketClient {
         let stream =
             UnixStream::connect(&socket_path).map_err(|_| SmcWriteError::HelperNotRunning)?;
         stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .set_read_timeout(Some(HELPER_REQUEST_TIMEOUT))
             .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
         stream
-            .set_write_timeout(Some(std::time::Duration::from_secs(5)))
+            .set_write_timeout(Some(HELPER_REQUEST_TIMEOUT))
             .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
-        let response = send_request_on(&stream, &HelperRequest::Ping)?;
+        let response = send_request_on(&stream, &HelperRequest::GetProtocolVersion)?;
         match response {
-            HelperResponse::Pong => Ok(Self { socket_path }),
+            HelperResponse::ProtocolVersion {
+                version: HELPER_PROTOCOL_VERSION,
+            } => Ok(Self { socket_path }),
+            HelperResponse::ProtocolVersion { version } => {
+                Err(SmcWriteError::HelperError(format!(
+                "helper update required: protocol {version}, expected {HELPER_PROTOCOL_VERSION}"
+            )))
+            }
             HelperResponse::Error { message } => Err(SmcWriteError::HelperError(message)),
             _ => Err(SmcWriteError::HelperError(
-                "unexpected ping response".to_string(),
+                "helper update required: incompatible protocol response".to_string(),
             )),
         }
     }
@@ -46,10 +56,10 @@ fn send_request_on(
     request: &HelperRequest,
 ) -> Result<HelperResponse, SmcWriteError> {
     stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .set_read_timeout(Some(HELPER_REQUEST_TIMEOUT))
         .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
     stream
-        .set_write_timeout(Some(std::time::Duration::from_secs(5)))
+        .set_write_timeout(Some(HELPER_REQUEST_TIMEOUT))
         .map_err(|e| SmcWriteError::HelperError(e.to_string()))?;
     let mut writer = stream
         .try_clone()
@@ -166,10 +176,12 @@ mod tests {
     }
 
     #[test]
-    fn connect_and_ping() {
+    fn connect_and_checks_protocol_version() {
         with_mock_helper(
             |req| match req {
-                HelperRequest::Ping => HelperResponse::Pong,
+                HelperRequest::GetProtocolVersion => HelperResponse::ProtocolVersion {
+                    version: crate::smc_protocol::HELPER_PROTOCOL_VERSION,
+                },
                 _ => HelperResponse::Error {
                     message: "unexpected".into(),
                 },
@@ -182,10 +194,33 @@ mod tests {
     }
 
     #[test]
+    fn connect_rejects_an_incompatible_helper_protocol() {
+        with_mock_helper(
+            |req| match req {
+                HelperRequest::GetProtocolVersion => HelperResponse::ProtocolVersion {
+                    version: crate::smc_protocol::HELPER_PROTOCOL_VERSION - 1,
+                },
+                _ => HelperResponse::Error {
+                    message: "unexpected".into(),
+                },
+            },
+            |path| {
+                let error = match SmcSocketClient::with_path(path) {
+                    Ok(_) => panic!("incompatible helper must be rejected"),
+                    Err(error) => error,
+                };
+                assert!(error.to_string().contains("helper update required"));
+            },
+        );
+    }
+
+    #[test]
     fn set_fan_auto_sends_correct_request() {
         with_mock_helper(
             |req| match req {
-                HelperRequest::Ping => HelperResponse::Pong,
+                HelperRequest::GetProtocolVersion => HelperResponse::ProtocolVersion {
+                    version: HELPER_PROTOCOL_VERSION,
+                },
                 HelperRequest::SetFanAuto { fan_index: 0 } => HelperResponse::Ok,
                 _ => HelperResponse::Error {
                     message: "unexpected".into(),
@@ -203,7 +238,9 @@ mod tests {
     fn error_response_maps_to_smc_write_error() {
         with_mock_helper(
             |req| match req {
-                HelperRequest::Ping => HelperResponse::Pong,
+                HelperRequest::GetProtocolVersion => HelperResponse::ProtocolVersion {
+                    version: HELPER_PROTOCOL_VERSION,
+                },
                 HelperRequest::SetFanAuto { .. } => HelperResponse::Error {
                     message: "Insufficient privileges".into(),
                 },

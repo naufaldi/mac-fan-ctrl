@@ -1,10 +1,10 @@
 {
 	"$schema": "../node_modules/@tauri-apps/cli/schema.json",
 	"productName": "FanGuard",
-	"version": "0.1.0-beta.6",
+	"version": "0.1.0-beta.7",
 	"identifier": "io.github.naufaldi.fanguard",
 	"build": {
-		"beforeDevCommand": "pnpm run dev:prepare-helper && pnpm run dev",
+		"beforeDevCommand": "pnpm run dev:prepare-helper && pnpm run dev:native",
 		"beforeBuildCommand": "pnpm run build",
 		"devUrl": "http://localhost:5173",
 		"frontendDist": "../dist"
