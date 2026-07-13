@@ -569,6 +569,10 @@ pub fn get_privilege_status(state: State<'_, AppState>) -> Result<PrivilegeStatu
     }
 
     let writer_guard = state.smc_writer.lock().map_err(|e| e.to_string())?;
+    debug_log!(
+        "[fanguard] privilege status: helper_write_access={}",
+        writer_guard.is_some()
+    );
     Ok(PrivilegeStatus {
         has_write_access: writer_guard.is_some(),
         fan_control_available: true,
