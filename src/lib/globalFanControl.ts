@@ -26,6 +26,21 @@ export type GlobalFanControlState = {
 	readonly disabledReason: string | null;
 };
 
+export type RpmScaleTick = {
+	readonly rpm: number;
+	readonly percent: number;
+	readonly kind: "major" | "minor";
+};
+
+export type ManualControlConstraint =
+	| { readonly kind: "blocked"; readonly reason: string }
+	| {
+			readonly kind: "ready";
+			readonly minRpm: number;
+			readonly maxRpm: number;
+			readonly reason: string | null;
+	  };
+
 const roundRpm = (value: number): number => Math.round(value);
 
 const average = (values: readonly number[]): number | null =>
@@ -39,9 +54,7 @@ const fanMinimums = (fans: readonly FanData[]): number[] =>
 const fanMaximums = (fans: readonly FanData[]): number[] =>
 	fans.map((fan) => roundRpm(fan.max));
 
-export const getSharedFanRange = (
-	fans: readonly FanData[],
-): SharedFanRange => {
+export const getSharedFanRange = (fans: readonly FanData[]): SharedFanRange => {
 	if (fans.length === 0) {
 		return { kind: "none", reason: "No fans detected." };
 	}
@@ -68,6 +81,70 @@ export const clampRpmTarget = (
 	}
 
 	return Math.max(range.minRpm, Math.min(range.maxRpm, roundRpm(targetRpm)));
+};
+
+export const buildRpmScale = (
+	minRpm: number,
+	maxRpm: number,
+): RpmScaleTick[] => {
+	if (maxRpm <= minRpm) {
+		return [];
+	}
+
+	const firstTick = Math.ceil(minRpm / 100) * 100;
+	const count = Math.max(0, Math.floor((maxRpm - firstTick) / 100) + 1);
+
+	return Array.from(
+		{ length: count },
+		(_, index) => firstTick + index * 100,
+	).map((rpm) => ({
+		rpm,
+		percent: ((rpm - minRpm) / (maxRpm - minRpm)) * 100,
+		kind: rpm % 500 === 0 ? "major" : "minor",
+	}));
+};
+
+export const getManualControlConstraint = (
+	fans: readonly FanData[],
+	range: SharedFanRange,
+	maxTemperatureC: number | null,
+): ManualControlConstraint => {
+	if (range.kind !== "ready") {
+		return { kind: "blocked", reason: range.reason };
+	}
+
+	if (maxTemperatureC === null) {
+		return { kind: "blocked", reason: "Temperature telemetry is unavailable." };
+	}
+
+	if (maxTemperatureC >= 95) {
+		return {
+			kind: "blocked",
+			reason: `Emergency cooling is active at ${Math.round(maxTemperatureC)}°C.`,
+		};
+	}
+
+	const highestActualRpm = Math.max(...fans.map((fan) => fan.actual));
+	const thermalMinimum = Math.ceil(highestActualRpm / 50) * 50;
+	const minRpm =
+		maxTemperatureC >= 85
+			? Math.max(range.minRpm, thermalMinimum)
+			: range.minRpm;
+
+	return minRpm <= range.maxRpm
+		? {
+				kind: "ready",
+				minRpm,
+				maxRpm: range.maxRpm,
+				reason:
+					maxTemperatureC >= 85
+						? `Hot system: minimum target ${new Intl.NumberFormat("en-US").format(minRpm)} RPM.`
+						: null,
+			}
+		: {
+				kind: "blocked",
+				reason: "Current fan speed exceeds the shared safe RPM range.",
+			};
 };
 
 export const deriveGlobalFanMode = (
