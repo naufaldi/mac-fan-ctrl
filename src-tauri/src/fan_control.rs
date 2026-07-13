@@ -27,13 +27,29 @@ pub enum GlobalFanControlError {
     NoFans,
     #[error("Detected fans do not share a safe RPM range")]
     NoSharedRange,
-    #[error("Target RPM {requested:.0} is outside the shared safe range {min_rpm:.0}-{max_rpm:.0}")]
+    #[error("Temperature telemetry is unavailable; Manual fan control is blocked")]
+    NoTemperatureTelemetry,
+    #[error(
+        "Emergency cooling is active at {max_temperature:.0}°C; Manual fan control is blocked"
+    )]
+    EmergencyCoolingActive { max_temperature: f64 },
+    #[error("System temperature is {max_temperature:.0}°C; target RPM {requested:.0} cannot be lower than the current safe minimum {minimum:.0}")]
+    UnsafeReductionWhileHot {
+        requested: f32,
+        minimum: f32,
+        max_temperature: f64,
+    },
+    #[error(
+        "Target RPM {requested:.0} is outside the shared safe range {min_rpm:.0}-{max_rpm:.0}"
+    )]
     TargetOutOfRange {
         requested: f32,
         min_rpm: f32,
         max_rpm: f32,
     },
-    #[error("Failed to apply {requested:.0} RPM to fan {fan_index}: {source}. Recovery: {recovery}")]
+    #[error(
+        "Failed to apply {requested:.0} RPM to fan {fan_index}: {source}. Recovery: {recovery}"
+    )]
     ApplyFailed {
         requested: f32,
         fan_index: u8,
@@ -42,6 +58,46 @@ pub enum GlobalFanControlError {
     },
     #[error("Failed to restore automatic fan control: {0}")]
     RestoreFailed(String),
+}
+
+pub(crate) fn validate_manual_thermal_target(
+    target_rpm: f32,
+    fans: &[FanData],
+    sensors: &[Sensor],
+) -> Result<(), GlobalFanControlError> {
+    let max_temperature = sensors
+        .iter()
+        .filter(|sensor| sensor.unit == "C")
+        .filter_map(|sensor| sensor.value)
+        .filter(|value| value.is_finite())
+        .reduce(f64::max)
+        .ok_or(GlobalFanControlError::NoTemperatureTelemetry)?;
+
+    if max_temperature >= EMERGENCY_TEMP_THRESHOLD {
+        return Err(GlobalFanControlError::EmergencyCoolingActive { max_temperature });
+    }
+
+    if max_temperature < 85.0 {
+        return Ok(());
+    }
+
+    let highest_actual = fans
+        .iter()
+        .map(|fan| fan.actual)
+        .filter(|rpm| rpm.is_finite())
+        .reduce(f32::max)
+        .ok_or(GlobalFanControlError::NoFans)?;
+    let minimum = (highest_actual / 50.0).ceil() * 50.0;
+
+    if target_rpm < minimum {
+        Err(GlobalFanControlError::UnsafeReductionWhileHot {
+            requested: target_rpm,
+            minimum,
+            max_temperature,
+        })
+    } else {
+        Ok(())
+    }
 }
 
 // ── Fan control configuration ────────────────────────────────────────────────
@@ -146,9 +202,7 @@ impl FanControlState {
             Ok(touched) => {
                 self.configs = touched
                     .into_iter()
-                    .map(|fan_index| {
-                        (fan_index, FanControlConfig::ConstantRpm { target_rpm })
-                    })
+                    .map(|fan_index| (fan_index, FanControlConfig::ConstantRpm { target_rpm }))
                     .collect();
                 Ok(())
             }
@@ -180,15 +234,16 @@ impl FanControlState {
         }
         let fan_indices = fans.iter().map(|fan| fan.index).collect::<Vec<_>>();
         let recovery = restore_fan_indices(&fan_indices, writer);
-        self.configs.retain(|index, _| recovery.retry_indices.contains(index));
+        self.configs
+            .retain(|index, _| recovery.retry_indices.contains(index));
         fans.iter()
             .filter(|fan| recovery.retry_indices.contains(&fan.index))
             .for_each(|fan| {
-                self.configs.entry(fan.index).or_insert(
-                    FanControlConfig::ConstantRpm {
+                self.configs
+                    .entry(fan.index)
+                    .or_insert(FanControlConfig::ConstantRpm {
                         target_rpm: fan.target,
-                    },
-                );
+                    });
             });
         if recovery.retry_indices.is_empty() {
             Ok(())
@@ -380,25 +435,25 @@ fn restore_fan_indices(fan_indices: &[u8], writer: &dyn SmcWriteApi) -> Recovery
         .collect::<Vec<_>>();
     let lock_failure = writer.lock_fan_control().err();
     let all_failures = failures
-		.iter()
-		.map(|(_, message)| message.clone())
+        .iter()
+        .map(|(_, message)| message.clone())
         .chain(lock_failure.map(|error| format!("thermal-control lock: {error}")))
         .collect::<Vec<_>>();
-	let retry_indices = if all_failures.is_empty() {
-		Vec::new()
-	} else if failures.is_empty() {
-		fan_indices.to_vec()
+    let retry_indices = if all_failures.is_empty() {
+        Vec::new()
+    } else if failures.is_empty() {
+        fan_indices.to_vec()
     } else {
-		failures.iter().map(|(fan_index, _)| *fan_index).collect()
-	};
-	RecoveryOutcome {
-		retry_indices,
-		message: if all_failures.is_empty() {
-			"all touched fans restored to Auto".to_string()
-		} else {
-			all_failures.join("; ")
-		},
-	}
+        failures.iter().map(|(fan_index, _)| *fan_index).collect()
+    };
+    RecoveryOutcome {
+        retry_indices,
+        message: if all_failures.is_empty() {
+            "all touched fans restored to Auto".to_string()
+        } else {
+            all_failures.join("; ")
+        },
+    }
 }
 
 // ── Pure helper functions ────────────────────────────────────────────────────
@@ -469,57 +524,61 @@ mod tests {
     use crate::smc::{NullReason, SensorSource};
     use crate::smc_writer::mock::{MockSmcCall, MockSmcWriter};
 
-	struct FailOnFanWriter {
-		calls: std::cell::RefCell<Vec<MockSmcCall>>,
-		failed_fan: u8,
-		fail_auto_for: Option<u8>,
-	}
+    struct FailOnFanWriter {
+        calls: std::cell::RefCell<Vec<MockSmcCall>>,
+        failed_fan: u8,
+        fail_auto_for: Option<u8>,
+    }
 
-	unsafe impl Send for FailOnFanWriter {}
-	unsafe impl Sync for FailOnFanWriter {}
+    unsafe impl Send for FailOnFanWriter {}
+    unsafe impl Sync for FailOnFanWriter {}
 
-	impl SmcWriteApi for FailOnFanWriter {
-		fn set_fan_target_rpm(
-			&self,
-			fan_index: u8,
-			rpm: f32,
-			_min_rpm: f32,
-			_max_rpm: f32,
-		) -> Result<(), SmcWriteError> {
-			self.calls.borrow_mut().push(MockSmcCall::SetFanTargetRpm { fan_index, rpm });
-			if fan_index == self.failed_fan {
-				Err(SmcWriteError::TargetVerificationFailed {
-					fan_index,
-					requested: rpm,
-					readback: 0.0,
-				})
-			} else {
-				Ok(())
-			}
-		}
+    impl SmcWriteApi for FailOnFanWriter {
+        fn set_fan_target_rpm(
+            &self,
+            fan_index: u8,
+            rpm: f32,
+            _min_rpm: f32,
+            _max_rpm: f32,
+        ) -> Result<(), SmcWriteError> {
+            self.calls
+                .borrow_mut()
+                .push(MockSmcCall::SetFanTargetRpm { fan_index, rpm });
+            if fan_index == self.failed_fan {
+                Err(SmcWriteError::TargetVerificationFailed {
+                    fan_index,
+                    requested: rpm,
+                    readback: 0.0,
+                })
+            } else {
+                Ok(())
+            }
+        }
 
-		fn set_fan_auto(&self, fan_index: u8) -> Result<(), SmcWriteError> {
-			self.calls.borrow_mut().push(MockSmcCall::SetFanAuto { fan_index });
-			if self.fail_auto_for == Some(fan_index) {
-				Err(SmcWriteError::InsufficientPrivileges)
-			} else {
-				Ok(())
-			}
-		}
+        fn set_fan_auto(&self, fan_index: u8) -> Result<(), SmcWriteError> {
+            self.calls
+                .borrow_mut()
+                .push(MockSmcCall::SetFanAuto { fan_index });
+            if self.fail_auto_for == Some(fan_index) {
+                Err(SmcWriteError::InsufficientPrivileges)
+            } else {
+                Ok(())
+            }
+        }
 
-		fn lock_fan_control(&self) -> Result<(), SmcWriteError> {
-			self.calls.borrow_mut().push(MockSmcCall::LockFanControl);
-			Ok(())
-		}
+        fn lock_fan_control(&self) -> Result<(), SmcWriteError> {
+            self.calls.borrow_mut().push(MockSmcCall::LockFanControl);
+            Ok(())
+        }
 
-		fn unlock_fan_control(&self) -> Result<(), SmcWriteError> {
-			Ok(())
-		}
+        fn unlock_fan_control(&self) -> Result<(), SmcWriteError> {
+            Ok(())
+        }
 
-		fn diagnose_fan_control(&self) -> Vec<String> {
-			Vec::new()
-		}
-	}
+        fn diagnose_fan_control(&self) -> Vec<String> {
+            Vec::new()
+        }
+    }
 
     fn make_fan(index: u8, min: f32, max: f32) -> FanData {
         FanData {
@@ -877,71 +936,146 @@ mod tests {
         assert_eq!(fans[0].target, 5000.0);
     }
 
-	#[test]
-	fn set_all_constant_rpm_uses_shared_range_and_updates_every_fan() {
-		let writer = MockSmcWriter::new();
-		let mut state = FanControlState::new();
-		let fans = vec![make_fan(0, 1200.0, 5800.0), make_fan(1, 1600.0, 6200.0)];
+    #[test]
+    fn set_all_constant_rpm_uses_shared_range_and_updates_every_fan() {
+        let writer = MockSmcWriter::new();
+        let mut state = FanControlState::new();
+        let fans = vec![make_fan(0, 1200.0, 5800.0), make_fan(1, 1600.0, 6200.0)];
 
-		state.set_all_constant_rpm(3200.0, &fans, &writer).unwrap();
+        state.set_all_constant_rpm(3200.0, &fans, &writer).unwrap();
 
-		assert_eq!(state.configs().len(), 2);
-		let calls = writer.calls.borrow();
-		assert_eq!(
+        assert_eq!(state.configs().len(), 2);
+        let calls = writer.calls.borrow();
+        assert_eq!(
 			calls.iter().filter(|call| matches!(call, MockSmcCall::SetFanTargetRpm { rpm, .. } if (*rpm - 3200.0).abs() < 1.0)).count(),
 			2,
 		);
-	}
+    }
 
-	#[test]
-	fn set_all_constant_rpm_rejects_target_outside_shared_range() {
-		let writer = MockSmcWriter::new();
-		let mut state = FanControlState::new();
-		let fans = vec![make_fan(0, 1200.0, 5800.0), make_fan(1, 1600.0, 6200.0)];
+    #[test]
+    fn set_all_constant_rpm_rejects_target_outside_shared_range() {
+        let writer = MockSmcWriter::new();
+        let mut state = FanControlState::new();
+        let fans = vec![make_fan(0, 1200.0, 5800.0), make_fan(1, 1600.0, 6200.0)];
 
-		let result = state.set_all_constant_rpm(1400.0, &fans, &writer);
+        let result = state.set_all_constant_rpm(1400.0, &fans, &writer);
 
-		assert!(matches!(result, Err(GlobalFanControlError::TargetOutOfRange { min_rpm: 1600.0, max_rpm: 5800.0, .. })));
-		assert!(writer.calls.borrow().is_empty());
-	}
+        assert!(matches!(
+            result,
+            Err(GlobalFanControlError::TargetOutOfRange {
+                min_rpm: 1600.0,
+                max_rpm: 5800.0,
+                ..
+            })
+        ));
+        assert!(writer.calls.borrow().is_empty());
+    }
 
-	#[test]
-	fn set_all_constant_rpm_restores_touched_fans_when_a_later_write_fails() {
-		let writer = FailOnFanWriter {
-			calls: std::cell::RefCell::new(Vec::new()),
-			failed_fan: 1,
-			fail_auto_for: None,
-		};
-		let mut state = FanControlState::new();
-		let fans = vec![make_fan(0, 1200.0, 5800.0), make_fan(1, 1200.0, 5800.0)];
+    #[test]
+    fn set_all_constant_rpm_restores_touched_fans_when_a_later_write_fails() {
+        let writer = FailOnFanWriter {
+            calls: std::cell::RefCell::new(Vec::new()),
+            failed_fan: 1,
+            fail_auto_for: None,
+        };
+        let mut state = FanControlState::new();
+        let fans = vec![make_fan(0, 1200.0, 5800.0), make_fan(1, 1200.0, 5800.0)];
 
-		let result = state.set_all_constant_rpm(3200.0, &fans, &writer);
+        let result = state.set_all_constant_rpm(3200.0, &fans, &writer);
 
-		assert!(matches!(result, Err(GlobalFanControlError::ApplyFailed { fan_index: 1, .. })));
-		assert!(state.configs().is_empty());
-		let calls = writer.calls.borrow();
-		assert!(calls.iter().any(|call| matches!(call, MockSmcCall::SetFanAuto { fan_index: 0 })));
-		assert!(calls.iter().any(|call| matches!(call, MockSmcCall::SetFanAuto { fan_index: 1 })));
-		assert!(calls.iter().any(|call| matches!(call, MockSmcCall::LockFanControl)));
-	}
+        assert!(matches!(
+            result,
+            Err(GlobalFanControlError::ApplyFailed { fan_index: 1, .. })
+        ));
+        assert!(state.configs().is_empty());
+        let calls = writer.calls.borrow();
+        assert!(calls
+            .iter()
+            .any(|call| matches!(call, MockSmcCall::SetFanAuto { fan_index: 0 })));
+        assert!(calls
+            .iter()
+            .any(|call| matches!(call, MockSmcCall::SetFanAuto { fan_index: 1 })));
+        assert!(calls
+            .iter()
+            .any(|call| matches!(call, MockSmcCall::LockFanControl)));
+    }
 
-	#[test]
-	fn set_all_constant_rpm_keeps_failed_recovery_tracked_for_shutdown_retry() {
-		let writer = FailOnFanWriter {
-			calls: std::cell::RefCell::new(Vec::new()),
-			failed_fan: 1,
-			fail_auto_for: Some(0),
-		};
-		let mut state = FanControlState::new();
-		let fans = vec![make_fan(0, 1200.0, 5800.0), make_fan(1, 1200.0, 5800.0)];
+    #[test]
+    fn set_all_constant_rpm_keeps_failed_recovery_tracked_for_shutdown_retry() {
+        let writer = FailOnFanWriter {
+            calls: std::cell::RefCell::new(Vec::new()),
+            failed_fan: 1,
+            fail_auto_for: Some(0),
+        };
+        let mut state = FanControlState::new();
+        let fans = vec![make_fan(0, 1200.0, 5800.0), make_fan(1, 1200.0, 5800.0)];
 
-		let result = state.set_all_constant_rpm(3200.0, &fans, &writer);
+        let result = state.set_all_constant_rpm(3200.0, &fans, &writer);
 
-		assert!(matches!(result, Err(GlobalFanControlError::ApplyFailed { .. })));
-		assert!(matches!(
-			state.configs().get(&0),
-			Some(FanControlConfig::ConstantRpm { target_rpm: 3200.0 })
-		));
-		assert!(!state.configs().contains_key(&1));
-	}
+        assert!(matches!(
+            result,
+            Err(GlobalFanControlError::ApplyFailed { .. })
+        ));
+        assert!(matches!(
+            state.configs().get(&0),
+            Some(FanControlConfig::ConstantRpm { target_rpm: 3200.0 })
+        ));
+        assert!(!state.configs().contains_key(&1));
+    }
+
+    #[test]
+    fn manual_thermal_validation_rejects_missing_temperature_telemetry() {
+        let fans = vec![make_fan(0, 1200.0, 5800.0)];
+
+        let result = validate_manual_thermal_target(3200.0, &fans, &[]);
+
+        assert!(matches!(
+            result,
+            Err(GlobalFanControlError::NoTemperatureTelemetry)
+        ));
+    }
+
+    #[test]
+    fn manual_thermal_validation_rejects_reducing_speed_while_hot() {
+        let mut fan = make_fan(0, 1200.0, 5800.0);
+        fan.actual = 3201.0;
+        let sensors = vec![make_sensor("TC0P", Some(86.0))];
+
+        let result = validate_manual_thermal_target(3200.0, &[fan], &sensors);
+
+        assert!(matches!(
+            result,
+            Err(GlobalFanControlError::UnsafeReductionWhileHot {
+                requested: 3200.0,
+                minimum: 3250.0,
+                max_temperature: 86.0,
+            })
+        ));
+    }
+
+    #[test]
+    fn manual_thermal_validation_allows_safe_increase_while_hot() {
+        let mut fan = make_fan(0, 1200.0, 5800.0);
+        fan.actual = 3201.0;
+        let sensors = vec![make_sensor("TC0P", Some(86.0))];
+
+        let result = validate_manual_thermal_target(3250.0, &[fan], &sensors);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn manual_thermal_validation_rejects_emergency_temperature() {
+        let fans = vec![make_fan(0, 1200.0, 5800.0)];
+        let sensors = vec![make_sensor("TC0P", Some(95.0))];
+
+        let result = validate_manual_thermal_target(5800.0, &fans, &sensors);
+
+        assert!(matches!(
+            result,
+            Err(GlobalFanControlError::EmergencyCoolingActive {
+                max_temperature: 95.0,
+            })
+        ));
+    }
 }

@@ -9,22 +9,30 @@ test.describe("FanGuard dashboard Liquid Glass layout", () => {
 		await page.setViewportSize({ width: 960, height: 486 });
 		await page.goto("/");
 
-		const restoreButton = page.getByRole("button", { name: "Restore Auto" });
-		const applyButton = page.getByRole("button", { name: "Apply" });
+		const autoButton = page.getByRole("button", { name: "Auto" });
+		const manualButton = page.getByRole("button", { name: "Manual" });
 		const targetSlider = page.getByRole("slider", { name: "Target RPM" });
 		const telemetryHeader = page.getByText("Name", { exact: true });
-		const restoreBounds = await restoreButton.boundingBox();
-		const applyBounds = await applyButton.boundingBox();
+		const manualBounds = await manualButton.boundingBox();
 		const sliderBounds = await targetSlider.boundingBox();
 
-		expect(restoreBounds).not.toBeNull();
-		expect((restoreBounds?.x ?? 960) + (restoreBounds?.width ?? 1)).toBeLessThanOrEqual(960);
-		await expect(restoreButton).toBeInViewport();
+		expect(manualBounds).not.toBeNull();
+		expect(
+			(manualBounds?.x ?? 960) + (manualBounds?.width ?? 1),
+		).toBeLessThanOrEqual(960);
+		await expect(autoButton).toBeInViewport();
+		await expect(manualButton).toBeInViewport();
+		await expect(targetSlider).toBeInViewport();
+		await expect(
+			page.locator('[data-rpm-tick="major"]').first(),
+		).toBeInViewport();
 		await expect(telemetryHeader).toBeInViewport();
-		await expect(page.getByText("System Fan 1", { exact: true })).toBeInViewport();
-		expect((sliderBounds?.x ?? 0) + (sliderBounds?.width ?? 960)).toBeLessThanOrEqual(
-			applyBounds?.x ?? 0,
-		);
+		await expect(
+			page.getByText("System Fan 1", { exact: true }),
+		).toBeInViewport();
+		expect(
+			(sliderBounds?.x ?? 0) + (sliderBounds?.width ?? 960),
+		).toBeLessThanOrEqual(960);
 		expect(
 			await page.evaluate(() => document.documentElement.scrollWidth),
 		).toBeLessThanOrEqual(960);
@@ -37,18 +45,26 @@ test.describe("FanGuard dashboard Liquid Glass layout", () => {
 
 		await expect(page.getByRole("heading", { name: "FanGuard" })).toBeVisible();
 		await expect(page.getByText("Fan Control", { exact: true })).toBeVisible();
-		await expect(page.getByRole("button", { name: "More actions" })).toBeVisible();
-		await expect(page.getByRole("searchbox", { name: "Search sensors" })).toBeVisible();
+		await expect(
+			page.getByRole("button", { name: "More actions" }),
+		).toBeVisible();
+		await expect(
+			page.getByRole("searchbox", { name: "Search sensors" }),
+		).toBeVisible();
 
 		await expect(page.getByRole("button", { name: /^Fans\b/ })).toBeVisible();
 		await expect(
 			page.getByRole("button", { name: /^Temperature Sensors/ }),
 		).toBeVisible();
-		await expect(page.getByRole("button", { name: /^Disk Drives/ })).toBeVisible();
+		await expect(
+			page.getByRole("button", { name: /^Disk Drives/ }),
+		).toBeVisible();
 
 		await expect(page.getByRole("button", { name: /Back/i })).toHaveCount(0);
 		await expect(page.getByRole("button", { name: /Forward/i })).toHaveCount(0);
-		await expect(page.getByRole("button", { name: /to custom mode$/i })).toHaveCount(0);
+		await expect(
+			page.getByRole("button", { name: /to custom mode$/i }),
+		).toHaveCount(0);
 		await expect(page.getByRole("dialog")).toHaveCount(0);
 
 		await expect(page.getByText("SMC Connected")).toBeVisible();
@@ -66,9 +82,7 @@ test.describe("FanGuard dashboard Liquid Glass layout", () => {
 
 		await temperatureGroup.click();
 		await expect(temperatureGroup).toHaveAttribute("aria-expanded", "false");
-		await expect(
-			page.getByText("Battery", { exact: true }),
-		).not.toBeVisible();
+		await expect(page.getByText("Battery", { exact: true })).not.toBeVisible();
 	});
 
 	test("filters visible telemetry rows without changing global control", async ({

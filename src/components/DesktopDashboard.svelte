@@ -20,7 +20,12 @@ import {
 	setTrayDisplayMode,
 } from "$lib/tauriCommands";
 import type { Sensor, SensorData } from "$lib/types";
-import { buttonGhost, buttonSecondary, popoverSurface, telemetryGrid } from "$lib/ui";
+import {
+	buttonGhost,
+	buttonSecondary,
+	popoverSurface,
+	telemetryGrid,
+} from "$lib/ui";
 import AboutDialog from "./AboutDialog.svelte";
 import DisclosureGroup from "./DisclosureGroup.svelte";
 import FanControlPane from "./FanControlPane.svelte";
@@ -49,13 +54,21 @@ let alwaysOnTop: boolean = $state(false);
 let trayDisplayMode: number = $state(0);
 
 const rawFans = $derived(sensorData?.fans ?? []);
+const maxTemperatureC = $derived.by(() => {
+	const temperatures = (sensorData?.details ?? [])
+		.filter((sensor) => sensor.unit === "C")
+		.flatMap((sensor) => (sensor.value === null ? [] : [sensor.value]));
+	return temperatures.length === 0 ? null : Math.max(...temperatures);
+});
 const allDisplaySensors = $derived(
 	sensorData ? getAllSensorsForDisplay(sensorData) : [],
 );
 const partitions = $derived(partitionDisplaySensors(allDisplaySensors));
 const temperatureSensors = $derived(partitions.temperature);
 const diskSensors = $derived(partitions.disk);
-const perCoreUnavailable = $derived(isPerCoreTemperatureUnavailable(sensorData));
+const perCoreUnavailable = $derived(
+	isPerCoreTemperatureUnavailable(sensorData),
+);
 const modelLabel = $derived(sensorData?.diagnostics?.model_id ?? "Unknown Mac");
 const fanAccessLabel = $derived(
 	!fanControlAvailable
@@ -80,7 +93,8 @@ $effect(() => {
 		.then((status) => {
 			hasWriteAccess = status.has_write_access;
 			fanControlAvailable = status.fan_control_available;
-			bannerMessage = status.reason ?? "Fan control requires elevated privileges.";
+			bannerMessage =
+				status.reason ?? "Fan control requires elevated privileges.";
 		})
 		.catch(() => {
 			hasWriteAccess = false;
@@ -270,7 +284,7 @@ function openAboutDialog(): void {
     </header>
 
     <main class={cn("flex min-h-0 grow flex-col overflow-hidden bg-(--material-window)")}>
-      <FanControlPane {rawFans} hasWriteAccess={hasWriteAccess} />
+      <FanControlPane {rawFans} hasWriteAccess={hasWriteAccess} {maxTemperatureC} />
 
       <div class={cn("mx-4 mb-3 flex min-h-0 grow flex-col overflow-hidden rounded-[7px] border border-(--border-subtle) bg-(--surface-1)")}>
         <div class={cn("grid min-h-8 shrink-0 items-center border-b border-(--border-subtle) bg-(--surface-1) px-3 text-[12px] font-medium text-(--text-primary)", telemetryGrid)}>

@@ -2,8 +2,10 @@
 import { AlertCircle, CheckCircle2, Info } from "lucide-svelte";
 import { cn } from "$lib/cn";
 import {
+	buildRpmScale,
 	clampRpmTarget,
 	type GlobalFanControlMode,
+	getManualControlConstraint,
 	toGlobalFanControlState,
 } from "$lib/globalFanControl";
 import {
@@ -12,71 +14,140 @@ import {
 	setAllFansConstantRpm,
 } from "$lib/tauriCommands";
 import type { FanData } from "$lib/types";
-import { buttonPrimary, buttonSecondary, segmentedActive, segmentedInactive } from "$lib/ui";
+import { buttonSecondary, segmentedActive, segmentedInactive } from "$lib/ui";
 
 interface Props {
 	rawFans: FanData[];
 	hasWriteAccess: boolean;
+	maxTemperatureC: number | null;
 }
 
-const { rawFans, hasWriteAccess }: Props = $props();
+const { rawFans, hasWriteAccess, maxTemperatureC }: Props = $props();
 
-const initialControlMode = (): GlobalFanControlMode => "auto";
-let selectedMode: GlobalFanControlMode = $state(initialControlMode());
-let targetRpm: number = $state(0);
-let lastStateSignature: string = $state("");
-let isApplying: boolean = $state(false);
+type ControlInteraction =
+	| { readonly kind: "auto" }
+	| { readonly kind: "manual-draft"; readonly targetRpm: number }
+	| { readonly kind: "settling"; readonly targetRpm: number }
+	| { readonly kind: "applying"; readonly targetRpm: number }
+	| { readonly kind: "applied"; readonly targetRpm: number }
+	| { readonly kind: "restoring" };
+
+const createAutoInteraction = (): ControlInteraction => ({ kind: "auto" });
+let interaction: ControlInteraction = $state(createAutoInteraction());
+let countdownMs: number = $state(2000);
+let hasHydratedHardwareMode: boolean = $state(false);
 let statusMessage: string | null = $state(null);
 let statusKind: "info" | "error" | "success" = $state("info");
 
 const globalState = $derived(toGlobalFanControlState(rawFans));
+const manualConstraint = $derived(
+	getManualControlConstraint(rawFans, globalState.range, maxTemperatureC),
+);
 const minRpm = $derived(
-	globalState.range.kind === "ready" ? globalState.range.minRpm : 0,
+	manualConstraint.kind === "ready"
+		? manualConstraint.minRpm
+		: globalState.range.kind === "ready"
+			? globalState.range.minRpm
+			: 0,
 );
 const maxRpm = $derived(
-	globalState.range.kind === "ready" ? globalState.range.maxRpm : 0,
+	manualConstraint.kind === "ready"
+		? manualConstraint.maxRpm
+		: globalState.range.kind === "ready"
+			? globalState.range.maxRpm
+			: 0,
+);
+const effectiveRange = $derived(
+	manualConstraint.kind === "ready"
+		? {
+				kind: "ready" as const,
+				minRpm: manualConstraint.minRpm,
+				maxRpm: manualConstraint.maxRpm,
+			}
+		: globalState.range,
+);
+const modeForInteraction = (value: ControlInteraction): GlobalFanControlMode =>
+	value.kind === "auto" || value.kind === "restoring" ? "auto" : "manual";
+const targetForInteraction = (
+	value: ControlInteraction,
+	fallback: number,
+): number => ("targetRpm" in value ? value.targetRpm : fallback);
+const isOperationPending = (value: ControlInteraction): boolean =>
+	value.kind === "applying" || value.kind === "restoring";
+const selectedMode: GlobalFanControlMode = $derived(
+	modeForInteraction(interaction),
+);
+const draftTargetRpm = $derived(
+	targetForInteraction(interaction, globalState.targetRpm),
 );
 const formatRpm = (value: number): string =>
 	new Intl.NumberFormat("en-US").format(Math.round(value));
 const currentRpmLabel = $derived(
-	globalState.currentRpm === null ? "N/A" : `${formatRpm(globalState.currentRpm)} RPM`,
+	globalState.currentRpm === null
+		? "N/A"
+		: `${formatRpm(globalState.currentRpm)} RPM`,
 );
-const targetValue = $derived(
-	clampRpmTarget(targetRpm, globalState.range),
-);
+const targetValue = $derived(clampRpmTarget(draftTargetRpm, effectiveRange));
 const targetPercent = $derived(
-	globalState.range.kind === "ready"
-		? ((targetValue - globalState.range.minRpm) /
-				(globalState.range.maxRpm - globalState.range.minRpm)) *
-			100
+	effectiveRange.kind === "ready"
+		? ((targetValue - effectiveRange.minRpm) /
+				(effectiveRange.maxRpm - effectiveRange.minRpm)) *
+				100
 		: 0,
 );
 const targetLabelPercent = $derived(Math.max(7, Math.min(93, targetPercent)));
-const canWriteManual = $derived(
-	hasWriteAccess &&
-		selectedMode === "manual" &&
-		globalState.canControl &&
-		!isApplying,
+const rpmScale = $derived(
+	effectiveRange.kind === "ready" ? buildRpmScale(minRpm, maxRpm) : [],
 );
+const operationPending = $derived(isOperationPending(interaction));
 const canRestoreAuto = $derived(
-	hasWriteAccess && globalState.fanCount > 0 && !isApplying,
+	hasWriteAccess && globalState.fanCount > 0 && !operationPending,
 );
+const operationLabel = $derived.by(() => {
+	switch (interaction.kind) {
+		case "settling":
+			return `Applying in ${(countdownMs / 1000).toFixed(1)}s`;
+		case "applying":
+			return "Verifying…";
+		case "applied":
+			return `Verified at ${formatRpm(interaction.targetRpm)} RPM`;
+		case "restoring":
+			return "Restoring Auto…";
+		case "auto":
+		case "manual-draft":
+			return null;
+	}
+});
 
 $effect(() => {
-	const signature = [
-		globalState.mode,
-		globalState.targetRpm,
-		globalState.fanCount,
-		globalState.range.kind,
-		globalState.range.kind === "ready" ? globalState.range.minRpm : "none",
-		globalState.range.kind === "ready" ? globalState.range.maxRpm : "none",
-	].join(":");
-
-	if (signature !== lastStateSignature) {
-		selectedMode = globalState.mode;
-		targetRpm = globalState.targetRpm;
-		lastStateSignature = signature;
+	if (!hasHydratedHardwareMode && globalState.fanCount > 0) {
+		interaction =
+			globalState.mode === "manual"
+				? { kind: "applied", targetRpm: globalState.targetRpm }
+				: { kind: "auto" };
+		hasHydratedHardwareMode = true;
 	}
+});
+
+$effect(() => {
+	const currentInteraction = interaction;
+	if (currentInteraction.kind !== "settling") {
+		return;
+	}
+
+	const startedAt = Date.now();
+	countdownMs = 2000;
+	const countdownInterval = window.setInterval(() => {
+		countdownMs = Math.max(0, 2000 - (Date.now() - startedAt));
+	}, 100);
+	const applyTimeout = window.setTimeout(() => {
+		void applyManualTarget(currentInteraction.targetRpm);
+	}, 2000);
+
+	return () => {
+		window.clearInterval(countdownInterval);
+		window.clearTimeout(applyTimeout);
+	};
 });
 
 function isDevModeError(message: string): boolean {
@@ -94,27 +165,22 @@ function isPrivilegeError(error: unknown): boolean {
 	);
 }
 
-async function handleManualApply(): Promise<void> {
-	if (!canWriteManual) {
-		return;
-	}
-
-	isApplying = true;
+async function applyManualTarget(rpm: number): Promise<void> {
+	interaction = { kind: "applying", targetRpm: rpm };
 	statusMessage = null;
-	const rpm = targetValue;
 	try {
 		await setAllFansConstantRpm(rpm);
+		interaction = { kind: "applied", targetRpm: rpm };
 		statusKind = "success";
 		statusMessage = `Applied ${rpm} RPM to ${globalState.fanCount} fan${globalState.fanCount === 1 ? "" : "s"}.`;
 	} catch (error) {
+		interaction = { kind: "auto" };
 		statusKind = "error";
 		statusMessage = isPrivilegeError(error)
 			? "Fan control requires elevated privileges."
 			: error instanceof Error
 				? error.message
 				: String(error);
-	} finally {
-		isApplying = false;
 	}
 }
 
@@ -123,19 +189,34 @@ async function handleRestoreAuto(): Promise<void> {
 		return;
 	}
 
-	isApplying = true;
+	interaction = { kind: "restoring" };
 	statusMessage = null;
 	try {
 		await restoreAllFansAuto();
-		selectedMode = "auto";
+		interaction = { kind: "auto" };
 		statusKind = "success";
 		statusMessage = `Restored automatic control for ${globalState.fanCount} fan${globalState.fanCount === 1 ? "" : "s"}.`;
 	} catch (error) {
+		interaction = { kind: "auto" };
 		statusKind = "error";
 		statusMessage = error instanceof Error ? error.message : String(error);
-	} finally {
-		isApplying = false;
 	}
+}
+
+function handleManualMode(): void {
+	if (
+		!hasWriteAccess ||
+		manualConstraint.kind !== "ready" ||
+		operationPending
+	) {
+		return;
+	}
+
+	interaction = {
+		kind: "manual-draft",
+		targetRpm: clampRpmTarget(globalState.targetRpm, effectiveRange),
+	};
+	statusMessage = null;
 }
 
 async function handleRestartWithPrivileges(): Promise<void> {
@@ -156,7 +237,11 @@ async function handleRestartWithPrivileges(): Promise<void> {
 
 function handleTargetInput(event: Event): void {
 	const input = event.currentTarget as HTMLInputElement;
-	targetRpm = clampRpmTarget(Number(input.value), globalState.range);
+	interaction = {
+		kind: "settling",
+		targetRpm: clampRpmTarget(Number(input.value), effectiveRange),
+	};
+	statusMessage = null;
 }
 </script>
 
@@ -178,7 +263,8 @@ function handleTargetInput(event: Event): void {
           type="button"
           class={cn(selectedMode === "auto" ? segmentedActive : segmentedInactive, "min-h-7 text-[13px]")}
           aria-pressed={selectedMode === "auto"}
-          onclick={() => { selectedMode = "auto"; }}
+          disabled={!canRestoreAuto}
+          onclick={handleRestoreAuto}
         >
           Auto
         </button>
@@ -186,7 +272,8 @@ function handleTargetInput(event: Event): void {
           type="button"
           class={cn(selectedMode === "manual" ? segmentedActive : segmentedInactive, "min-h-7 text-[13px]")}
           aria-pressed={selectedMode === "manual"}
-          onclick={() => { selectedMode = "manual"; }}
+          disabled={!hasWriteAccess || manualConstraint.kind !== "ready" || operationPending}
+          onclick={handleManualMode}
         >
           Manual
         </button>
@@ -201,12 +288,12 @@ function handleTargetInput(event: Event): void {
         <span class={cn("w-10 text-right text-[12px] tabular-nums text-(--text-primary)")}>
           {globalState.range.kind === "ready" ? minRpm : "--"}
         </span>
-        <div class={cn("relative min-w-0 grow pt-5")}>
+        <div class={cn("relative min-w-0 grow pb-9 pt-5")}>
           <span
             class={cn("absolute top-0 -translate-x-1/2 text-[13px] font-medium tabular-nums text-(--accent-blue)")}
 			style={`left: ${targetLabelPercent}%`}
           >
-            {globalState.canControl ? `${targetValue} RPM` : "--"}
+            {manualConstraint.kind === "ready" ? `${targetValue} RPM` : "--"}
           </span>
           <input
             type="range"
@@ -215,11 +302,25 @@ function handleTargetInput(event: Event): void {
             step="50"
             value={targetValue}
             aria-label="Target RPM"
-            disabled={!globalState.canControl || selectedMode === "auto" || !hasWriteAccess || isApplying}
+            disabled={manualConstraint.kind !== "ready" || selectedMode === "auto" || !hasWriteAccess || operationPending}
             class={cn("liquid-range w-full")}
             style={`--range-progress: ${targetPercent}%`}
             oninput={handleTargetInput}
           />
+          <div class={cn("pointer-events-none absolute inset-x-0 top-7 h-7")} aria-hidden="true">
+            {#each rpmScale as tick (tick.rpm)}
+              <span
+                data-rpm-tick={tick.kind}
+                class={cn("absolute top-0 -translate-x-1/2 text-center")}
+                style={`left: ${tick.percent}%`}
+              >
+                <span class={cn("mx-auto block w-px bg-(--border-strong)", tick.kind === "major" ? "h-2" : "h-1")}></span>
+                {#if tick.kind === "major"}
+                  <span class={cn("mt-0.5 block text-[9px] tabular-nums text-(--text-muted)")}>{tick.rpm}</span>
+                {/if}
+              </span>
+            {/each}
+          </div>
         </div>
         <span class={cn("w-10 text-[12px] tabular-nums text-(--text-primary)")}>
           {globalState.range.kind === "ready" ? maxRpm : "--"}
@@ -229,23 +330,8 @@ function handleTargetInput(event: Event): void {
           Current average: {currentRpmLabel}
         </div>
       </div>
-      <div class={cn("flex items-center justify-end gap-2")}>
-        <button
-          type="button"
-          class={cn(buttonPrimary, "min-h-8 min-w-[96px] rounded-[7px] text-[13px]")}
-          disabled={!canWriteManual}
-          onclick={handleManualApply}
-        >
-          {isApplying ? "Applying..." : "Apply"}
-        </button>
-        <button
-          type="button"
-          class={cn(buttonSecondary, "min-h-8 min-w-[112px] rounded-[7px] text-[13px]")}
-          disabled={!canRestoreAuto}
-          onclick={handleRestoreAuto}
-        >
-          Restore Auto
-        </button>
+      <div class={cn("flex min-w-[160px] items-center justify-end text-[12px] tabular-nums text-(--text-secondary)")} role="status">
+        {operationLabel ?? (selectedMode === "manual" ? "Adjust RPM to schedule" : "Automatic control")}
       </div>
     </div>
 
@@ -257,6 +343,12 @@ function handleTargetInput(event: Event): void {
     {#if globalState.disabledReason}
       <p class={cn("mt-2 text-[11px] text-(--text-secondary)")} role="status">
         {globalState.disabledReason}
+      </p>
+    {/if}
+
+    {#if manualConstraint.reason}
+      <p class={cn("mt-2 text-[11px]", manualConstraint.kind === "blocked" ? "text-(--status-hot)" : "text-(--status-warm)")} role="status">
+        {manualConstraint.reason}
       </p>
     {/if}
 
