@@ -26,6 +26,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
+		"dev:app": "tauri dev",
 		"dev:prepare-helper": "\"$HOME/.cargo/bin/cargo\" build --manifest-path src-tauri/Cargo.toml --features helper-binary --bin fanguard-helper",
 		"build": "vite build",
 		"build:app-store": "VITE_FANGUARD_DISTRIBUTION=app-store vite build",

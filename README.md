@@ -47,11 +47,11 @@ brew upgrade --cask fanguard
 # Install dependencies
 pnpm install
 
-# Run full app (frontend + Rust backend)
-pnpm tauri dev
+# Run full app (builds helper binary + starts frontend + Rust backend)
+pnpm dev:app
 
-# Run with fan control (requires root)
-sudo pnpm tauri dev
+# Equivalent lower-level Tauri command
+pnpm tauri dev
 
 # Frontend unit tests
 pnpm test
